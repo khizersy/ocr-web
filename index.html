@@ -3,24 +3,28 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Easy OCR — Demo</title>
+  <title>Easy OCR — Demo (with Crop + DOC)</title>
 
-  <!-- Tailwind Play CDN (fast for prototypes) -->
+  <!-- Tailwind Play CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Cropper.js CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/cropperjs@1.5.13/dist/cropper.min.css"/>
+
   <style>
-    /* small custom tweaks */
-    .glass { background: rgba(255,255,255,0.9); backdrop-filter: blur(6px); }
+    .glass { background: rgba(255,255,255,0.95); backdrop-filter: blur(4px); }
     textarea { resize: vertical; }
-    /* ensure debug pre wraps nicely */
     pre.debug { white-space: pre-wrap; word-break: break-word; }
+    .preview-box { min-height: 220px; max-height: 420px; display:flex; align-items:center; justify-content:center; }
+    img#preview { max-width:100%; max-height:420px; display:block; }
   </style>
 </head>
 <body class="min-h-screen bg-gray-50 py-10">
   <main class="max-w-4xl mx-auto px-4">
     <div class="glass rounded-2xl shadow-lg p-6">
       <header class="mb-4">
-        <h1 class="text-2xl font-semibold text-slate-800">Easy Image Text — Demo</h1>
-        <p class="text-sm text-slate-500 mt-1">Upload an image, choose language, and extract text instantly — now with PDF download and modern UI.</p>
+        <h1 class="text-2xl font-semibold text-slate-800">Easy Image Text — Demo (Crop + PDF/TXT/DOC)</h1>
+        <p class="text-sm text-slate-500 mt-1">Select image → crop → Recognize → Download (TXT / PDF / DOC)</p>
       </header>
 
       <!-- Controls -->
@@ -44,9 +48,21 @@
       <!-- Preview + result -->
       <section class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div class="border border-slate-100 rounded-lg p-3 bg-white">
-          <h3 class="text-sm font-medium text-slate-700 mb-2">Preview</h3>
-          <img id="preview" alt="preview image" class="w-full max-h-72 object-contain rounded-md hidden border"/>
-          <div id="noPreview" class="text-sm text-slate-400">No image selected</div>
+          <div class="flex justify-between items-center mb-2">
+            <h3 class="text-sm font-medium text-slate-700">Preview & Crop</h3>
+            <div class="flex gap-2">
+              <button id="startCrop" class="px-3 py-1 rounded-md border border-slate-200 text-sm">Start Crop</button>
+              <button id="applyCrop" class="px-3 py-1 rounded-md bg-amber-600 text-white text-sm">Apply Crop</button>
+              <button id="resetCrop" class="px-3 py-1 rounded-md border border-slate-200 text-sm">Reset</button>
+            </div>
+          </div>
+          <div class="preview-box bg-gray-50 rounded-md overflow-hidden">
+            <div id="noPreview" class="text-sm text-slate-400">No image selected</div>
+            <div style="max-width:100%; display:none" id="imgWrap">
+              <img id="preview" alt="preview image"/>
+            </div>
+          </div>
+          <small class="text-xs text-slate-400 mt-2">Use <strong>Start Crop</strong> to enable crop box. Then drag to select area and press <strong>Apply Crop</strong>.</small>
         </div>
 
         <div class="bg-white border border-slate-100 rounded-lg p-3 flex flex-col">
@@ -56,6 +72,7 @@
               <button id="copyBtn" class="px-3 py-1 rounded-md border border-slate-200 text-sm hover:bg-slate-50">Copy</button>
               <button id="downloadTxt" class="px-3 py-1 rounded-md bg-green-600 text-white text-sm hover:bg-green-700">Download .txt</button>
               <button id="downloadPdf" class="px-3 py-1 rounded-md bg-emerald-700 text-white text-sm hover:bg-emerald-800">Download .pdf</button>
+              <button id="downloadDoc" class="px-3 py-1 rounded-md bg-indigo-700 text-white text-sm hover:bg-indigo-800">Download .doc</button>
             </div>
           </div>
 
@@ -65,7 +82,7 @@
 
       <!-- helper + debug -->
       <section class="mt-4 text-sm text-slate-500">
-        <p>Tip: Use clear, high-contrast photos for best results. Hindi may take longer to load.</p>
+        <p>Tip: Crop to focus on text area for better results. Hindi may take longer to load.</p>
       </section>
 
       <section class="mt-6">
@@ -81,21 +98,17 @@
     </div>
   </main>
 
-  <!-- Libraries: Tesseract + jsPDF -->
+  <!-- Libraries: Tesseract + jsPDF + Cropper.js -->
   <script>
-    // loader to try multiple CDNs for Tesseract
     function loadScript(src){
       return new Promise((res,rej)=>{
-        const s=document.createElement('script');
-        s.src=src; s.async=true;
-        s.onload=()=>res(src);
-        s.onerror=()=>rej(src);
-        document.head.appendChild(s);
+        const s=document.createElement('script'); s.src=src; s.async=true;
+        s.onload=()=>res(src); s.onerror=()=>rej(src); document.head.appendChild(s);
       });
     }
     (async function(){
       const dbg = el('debug'), errEl = el('errors');
-      log("Loading Tesseract...");
+      log("Loading resources...");
       try {
         await loadScript('https://unpkg.com/tesseract.js@2.1.4/dist/tesseract.min.js');
         log("Tesseract loaded (unpkg).");
@@ -105,50 +118,88 @@
         catch(e2){ errEl.textContent = "Failed to load Tesseract library (CDN blocked)"; log("Both Tesseract CDNs failed."); return; }
       }
 
-      // load jsPDF (for PDF export)
-      try {
-        await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
-        log("jsPDF loaded.");
-      } catch(e){
-        log("jsPDF CDN failed.", e);
-      }
+      // jsPDF
+      try { await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'); log("jsPDF loaded."); } catch(e){ log("jsPDF load failed."); }
+
+      // Cropper.js
+      try { await loadScript('https://unpkg.com/cropperjs@1.5.13/dist/cropper.min.js'); log("Cropper loaded."); } catch(e){ log("Cropper load failed."); }
 
       initUI();
     })();
 
-    // helper
     function el(id){ return document.getElementById(id); }
     function log(msg){ const d=el('debug'); d.textContent += msg + "\n"; console.log(msg); }
     function showErr(msg){ el('errors').textContent = msg; log("ERROR: " + msg); }
 
-    function initUI(){
-      const input = el('imageInput'), preview = el('preview'), noPreview = el('noPreview');
-      const btn = el('recognizeBtn'), result = el('result'), progressEl = el('progress'), langSel = el('lang');
-      const copyBtn = el('copyBtn'), downloadTxt = el('downloadTxt'), downloadPdf = el('downloadPdf');
-      const spinner = el('spinner');
+    let cropper = null;
+    let currentImageURL = '';
+    let lastCroppedBlobURL = '';
 
-      let imgUrl = '';
+    function initUI(){
+      const input = el('imageInput'), preview = el('preview'), imgWrap = el('imgWrap'), noPreview = el('noPreview');
+      const startCrop = el('startCrop'), applyCrop = el('applyCrop'), resetCrop = el('resetCrop');
+      const btn = el('recognizeBtn'), result = el('result'), progressEl = el('progress'), langSel = el('lang');
+      const copyBtn = el('copyBtn'), downloadTxt = el('downloadTxt'), downloadPdf = el('downloadPdf'), downloadDoc = el('downloadDoc');
 
       input.addEventListener('change', (e)=>{
         const f = e.target.files[0];
         if(!f) return;
-        imgUrl = URL.createObjectURL(f);
-        preview.src = imgUrl;
-        preview.classList.remove('hidden');
+        if(currentImageURL) URL.revokeObjectURL(currentImageURL);
+        if(lastCroppedBlobURL) { URL.revokeObjectURL(lastCroppedBlobURL); lastCroppedBlobURL=''; }
+        currentImageURL = URL.createObjectURL(f);
+        preview.src = currentImageURL;
+        imgWrap.style.display = 'block';
         noPreview.style.display = 'none';
         result.value = '';
         btn.disabled = false;
         progressEl.textContent = '';
+        if(cropper){ cropper.destroy(); cropper = null; }
+      });
+
+      startCrop.addEventListener('click', ()=>{
+        if(!preview.src){ showErr("Select an image first."); return; }
+        if(cropper){ showErr("Cropper already active. Drag handles then press Apply Crop."); return; }
+        cropper = new Cropper(preview, {
+          viewMode: 1,
+          autoCropArea: 0.7,
+          movable: true,
+          zoomable: true,
+          scalable: false,
+          background: false,
+        });
+        log("Cropper started. Set area and press Apply Crop.");
+      });
+
+      applyCrop.addEventListener('click', ()=>{
+        if(!cropper){ showErr("Cropper not active."); return; }
+        const canvas = cropper.getCroppedCanvas();
+        if(!canvas){ showErr("Crop failed."); return; }
+        canvas.toBlob((blob)=>{
+          if(lastCroppedBlobURL) URL.revokeObjectURL(lastCroppedBlobURL);
+          lastCroppedBlobURL = URL.createObjectURL(blob);
+          preview.src = lastCroppedBlobURL;
+          cropper.destroy(); cropper = null;
+          log("Applied crop. Cropped image ready for OCR.");
+        }, 'image/png');
+      });
+
+      resetCrop.addEventListener('click', ()=>{
+        if(cropper){ cropper.destroy(); cropper = null; log("Cropper destroyed."); }
+        if(lastCroppedBlobURL){ URL.revokeObjectURL(lastCroppedBlobURL); lastCroppedBlobURL=''; }
+        if(currentImageURL){ preview.src = currentImageURL; imgWrap.style.display='block'; noPreview.style.display='none'; }
+        result.value='';
+        el('errors').textContent='';
+        progressEl.textContent='';
       });
 
       btn.addEventListener('click', async ()=>{
-        if(!imgUrl) return;
+        const imageForOCR = lastCroppedBlobURL || currentImageURL;
+        if(!imageForOCR){ showErr("Select an image first."); return; }
         btn.disabled = true;
-        spinner.classList.remove('hidden');
+        el('spinner').classList.remove('hidden');
         progressEl.textContent = 'Initializing...';
         el('errors').textContent = '';
         try{
-          // use worker pattern
           const worker = Tesseract.createWorker({
             logger: m => {
               const pct = m.progress ? Math.round(m.progress*100) : '';
@@ -161,7 +212,7 @@
           await worker.loadLanguage(chosen);
           await worker.initialize(chosen);
           progressEl.textContent = 'Recognizing...';
-          const { data } = await worker.recognize(imgUrl);
+          const { data } = await worker.recognize(imageForOCR);
           result.value = data.text.trim();
           progressEl.textContent = 'Done';
           await worker.terminate();
@@ -170,7 +221,7 @@
           progressEl.textContent = 'Error';
         } finally {
           btn.disabled = false;
-          spinner.classList.add('hidden');
+          el('spinner').classList.add('hidden');
         }
       });
 
@@ -188,36 +239,24 @@
         const text = result.value || '';
         const blob = new Blob([text], {type:'text/plain;charset=utf-8'});
         const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = 'ocr-result.txt';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
+        const a = document.createElement('a'); a.href = url; a.download = 'ocr-result.txt'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
       });
 
       downloadPdf.addEventListener('click', ()=>{
         const text = result.value || '';
         if(!text){ showErr("Nothing to export — run OCR first."); return; }
         try{
-          // jsPDF via global (UMD)
-          const { jsPDF } = window.jspdf || window.jspdf || {};
-          if(!jsPDF){
-            showErr("jsPDF not loaded.");
-            return;
-          }
+          const { jsPDF } = window.jspdf || {};
+          if(!jsPDF){ showErr("jsPDF not loaded."); return; }
           const doc = new jsPDF({ unit: 'pt', format: 'a4' });
           const pageWidth = doc.internal.pageSize.getWidth();
           const margin = 40;
           const usableWidth = pageWidth - margin*2;
           doc.setFont('Times', 'Normal');
           doc.setFontSize(12);
-
-          // split large text into lines that fit
           const lines = doc.splitTextToSize(text, usableWidth);
           let cursorY = 60;
           const lineHeight = 14;
-
           doc.text("OCR result", margin, 40);
           for(let i=0;i<lines.length;i++){
             if(cursorY + lineHeight > doc.internal.pageSize.getHeight() - 40){
@@ -233,7 +272,47 @@
         }
       });
 
+      // NEW: Download as Word .doc (HTML-based doc)
+      downloadDoc.addEventListener('click', ()=>{
+        const text = result.value || '';
+        if(!text){ showErr("Nothing to export — run OCR first."); return; }
+        // Create a simple Word-compatible HTML document
+        const title = "OCR result";
+        // Basic styling for Word
+        const htmlContent = `
+          <!doctype html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <title>${escapeHtml(title)}</title>
+            <style>
+              body{font-family: Arial, Helvetica, sans-serif; font-size: 12pt; color:#111; padding:20px}
+              h1{color:#0b6;}
+              pre{white-space:pre-wrap; font-family:inherit}
+            </style>
+          </head>
+          <body>
+            <h1>${escapeHtml(title)}</h1>
+            <pre>${escapeHtml(text)}</pre>
+          </body>
+          </html>
+        `;
+        const blob = new Blob([htmlContent], { type: 'application/msword;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = 'ocr-result.doc'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      });
+
+      // helper to escape HTML
+      function escapeHtml(str){
+        if(!str) return '';
+        return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+      }
+
     } // initUI end
   </script>
+
+  <!-- Cropper.js -->
+  <script src="https://unpkg.com/cropperjs@1.5.13/dist/cropper.min.js"></script>
+  <!-- jsPDF is loaded earlier via dynamic loader; ensure it's available for PDF export -->
 </body>
 </html>
