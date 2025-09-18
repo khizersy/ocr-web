@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Easy OCR (Demo)</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;display:flex;flex-direction:column;align-items:center;padding:20px;background:#f7f8fb}
+    .card{max-width:900px;width:100%;background:#fff;box-shadow:0 6px 18px rgba(0,0,0,0.06);padding:18px;border-radius:8px}
+    #preview{max-width:100%;max-height:360px;margin:10px 0;display:none;border-radius:6px;border:1px solid #eee}
+    #result{width:100%;min-height:120px;margin-top:10px;padding:10px;border-radius:6px;border:1px solid #ddd;white-space:pre-wrap}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    button{padding:10px 14px;border:none;border-radius:6px;cursor:pointer;background:#0066ff;color:#fff}
+    select,input[type=file]{padding:8px;border-radius:6px;border:1px solid #ccc}
+    #progress{margin-left:10px;font-size:0.95rem;color:#333}
+    small{color:#666}
+    .info{margin-top:8px;color:#444}
+    .error{color:#b00020}
+    pre.debug{background:#111;color:#fff;padding:8px;border-radius:6px;overflow:auto;max-height:220px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Easy Image Text — Demo</h2>
+
+    <div class="row">
+      <input id="imageInput" type="file" accept="image/*"/>
+      <select id="lang" title="Select language">
+        <option value="eng">English (eng)</option>
+        <option value="hin">Hindi (hin) — larger download, slower</option>
+      </select>
+      <button id="recognizeBtn" disabled>Recognize Text</button>
+      <span id="progress"></span>
+    </div>
+
+    <img id="preview" alt="preview image"/>
+    <div class="info">
+      <small>Tip: Clear, high-contrast photos give best results.</small>
+    </div>
+    <textarea id="result" placeholder="Recognized text will appear here..."></textarea>
+
+    <div style="margin-top:12px">
+      <button id="downloadTxt" style="background:#0b8f3b">Download .txt</button>
+    </div>
+
+    <hr style="margin:16px 0"/>
+    <div>
+      <h4>Debug console (if site shows blank):</h4>
+      <div id="debugWrap">
+        <div id="errors" class="error"></div>
+        <pre id="debug" class="debug"></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- Try primary CDN first; fallback to second if fails -->
+  <script>
+    // runtime loader for tesseract: tries unpkg then jsdelivr
+    function loadScript(src){
+      return new Promise((res,rej)=>{
+        const s=document.createElement('script');
+        s.src=src; s.async=true;
+        s.onload=()=>res(src);
+        s.onerror=()=>rej(src);
+        document.head.appendChild(s);
+      })
+    }
+
+    (async function (){
+      const debug = (msg)=> {
+        const d = document.getElementById('debug');
+        d.textContent += msg + "\n";
+        console.log(msg);
+      };
+      try {
+        debug("Loading Tesseract from unpkg...");
+        await loadScript('https://unpkg.com/tesseract.js@2.1.4/dist/tesseract.min.js');
+        debug("Loaded Tesseract from unpkg.");
+      } catch(e1) {
+        debug("unpkg failed, trying jsdelivr...");
+        try{
+          await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@2.1.4/dist/tesseract.min.js');
+          debug("Loaded Tesseract from jsdelivr.");
+        } catch(e2){
+          const errEl = document.getElementById('errors');
+          errEl.textContent = 'Error loading Tesseract library. Check network or content-security policy (CDN blocked).';
+          debug("Both CDNs failed to load Tesseract.");
+          return;
+        }
+      }
+      initializeUI();
+    })();
+
+    function initializeUI(){
+      const input = document.getElementById('imageInput');
+      const preview = document.getElementById('preview');
+      const btn = document.getElementById('recognizeBtn');
+      const result = document.getElementById('result');
+      const progressEl = document.getElementById('progress');
+      const langSel = document.getElementById('lang');
+      const downloadBtn = document.getElementById('downloadTxt');
+      let imgUrl='';
+
+      input.addEventListener('change', (e)=>{
+        const f = e.target.files[0];
+        if(!f) return;
+        imgUrl = URL.createObjectURL(f);
+        preview.src = imgUrl;
+        preview.style.display = 'block';
+        result.value = '';
+        btn.disabled = false;
+        progressEl.textContent = '';
+      });
+
+      btn.addEventListener('click', async ()=>{
+        if(!imgUrl) return;
+        btn.disabled = true;
+        result.value = '';
+        progressEl.textContent = 'Initializing...';
+        const chosenLang = langSel.value || 'eng';
+        try{
+          const worker = Tesseract.createWorker({
+            logger: m => {
+              const pct = m.progress ? Math.round(m.progress*100) : '';
+              progressEl.textContent = `${m.status} ${pct? '('+pct+'%)':''}`;
+            }
+          });
+          progressEl.textContent = 'Loading worker...';
+          await worker.load();
+          await worker.loadLanguage(chosenLang);
+          await worker.initialize(chosenLang);
+          progressEl.textContent = 'Recognizing...';
+          const { data } = await worker.recognize(imgUrl);
+          result.value = data.text.trim();
+          await worker.terminate();
+          progressEl.textContent = 'Done';
+        }catch(err){
+          document.getElementById('errors').textContent = 'OCR error: ' + (err.message || err);
+          console.error(err);
+          progressEl.textContent = 'Error';
+        } finally { btn.disabled = false; }
+      });
+
+      downloadBtn.addEventListener('click', ()=>{
+        const text = result.value || '';
+        const blob = new Blob([text], {type:'text/plain;charset=utf-8'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'ocr-result.txt';
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+    }
+  </script>
+</body>
+</html>
