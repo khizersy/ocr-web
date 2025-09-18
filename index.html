@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Easy OCR — Demo (with Crop + DOC)</title>
+  <title>Easy OCR — Demo (Crop + PDF/TXT/DOC, image-PDF)</title>
 
   <!-- Tailwind Play CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -24,7 +24,7 @@
     <div class="glass rounded-2xl shadow-lg p-6">
       <header class="mb-4">
         <h1 class="text-2xl font-semibold text-slate-800">Easy Image Text — Demo (Crop + PDF/TXT/DOC)</h1>
-        <p class="text-sm text-slate-500 mt-1">Select image → crop → Recognize → Download (TXT / PDF / DOC)</p>
+        <p class="text-sm text-slate-500 mt-1">Select image → crop → Recognize → Download (TXT / image-PDF / DOC)</p>
       </header>
 
       <!-- Controls -->
@@ -62,7 +62,7 @@
               <img id="preview" alt="preview image"/>
             </div>
           </div>
-          <small class="text-xs text-slate-400 mt-2">Use <strong>Start Crop</strong> to enable crop box. Then drag to select area and press <strong>Apply Crop</strong>.</small>
+          <small class="text-xs text-slate-400 mt-2">Use <strong>Start Crop</strong> to enable crop box. Drag to select area and press <strong>Apply Crop</strong>.</small>
         </div>
 
         <div class="bg-white border border-slate-100 rounded-lg p-3 flex flex-col">
@@ -98,7 +98,7 @@
     </div>
   </main>
 
-  <!-- Libraries: Tesseract + jsPDF + Cropper.js -->
+  <!-- Libraries loaded dynamically: Tesseract, jsPDF, html2canvas, Cropper -->
   <script>
     function loadScript(src){
       return new Promise((res,rej)=>{
@@ -106,9 +106,12 @@
         s.onload=()=>res(src); s.onerror=()=>rej(src); document.head.appendChild(s);
       });
     }
+
     (async function(){
       const dbg = el('debug'), errEl = el('errors');
       log("Loading resources...");
+
+      // Tesseract (try unpkg then jsdelivr)
       try {
         await loadScript('https://unpkg.com/tesseract.js@2.1.4/dist/tesseract.min.js');
         log("Tesseract loaded (unpkg).");
@@ -120,6 +123,9 @@
 
       // jsPDF
       try { await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'); log("jsPDF loaded."); } catch(e){ log("jsPDF load failed."); }
+
+      // html2canvas (for image-based PDF)
+      try { await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'); log("html2canvas loaded."); } catch(e){ log("html2canvas load failed."); }
 
       // Cropper.js
       try { await loadScript('https://unpkg.com/cropperjs@1.5.13/dist/cropper.min.js'); log("Cropper loaded."); } catch(e){ log("Cropper load failed."); }
@@ -160,12 +166,7 @@
         if(!preview.src){ showErr("Select an image first."); return; }
         if(cropper){ showErr("Cropper already active. Drag handles then press Apply Crop."); return; }
         cropper = new Cropper(preview, {
-          viewMode: 1,
-          autoCropArea: 0.7,
-          movable: true,
-          zoomable: true,
-          scalable: false,
-          background: false,
+          viewMode: 1, autoCropArea: 0.7, movable: true, zoomable: true, scalable: false, background: false,
         });
         log("Cropper started. Set area and press Apply Crop.");
       });
@@ -242,43 +243,113 @@
         const a = document.createElement('a'); a.href = url; a.download = 'ocr-result.txt'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
       });
 
-      downloadPdf.addEventListener('click', ()=>{
+      // REPLACED downloadPdf: use html2canvas to render a wrapper (image + text) so Hindi displays correctly
+      downloadPdf.addEventListener('click', async ()=>{
         const text = result.value || '';
-        if(!text){ showErr("Nothing to export — run OCR first."); return; }
-        try{
-          const { jsPDF } = window.jspdf || {};
-          if(!jsPDF){ showErr("jsPDF not loaded."); return; }
-          const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-          const pageWidth = doc.internal.pageSize.getWidth();
-          const margin = 40;
-          const usableWidth = pageWidth - margin*2;
-          doc.setFont('Times', 'Normal');
-          doc.setFontSize(12);
-          const lines = doc.splitTextToSize(text, usableWidth);
-          let cursorY = 60;
-          const lineHeight = 14;
-          doc.text("OCR result", margin, 40);
-          for(let i=0;i<lines.length;i++){
-            if(cursorY + lineHeight > doc.internal.pageSize.getHeight() - 40){
-              doc.addPage();
-              cursorY = 60;
-            }
-            doc.text(lines[i], margin, cursorY);
-            cursorY += lineHeight;
+        if(!text && !preview.src){ showErr("Nothing to export — run OCR first."); return; }
+
+        // create wrapper node
+        const wrapper = document.createElement('div');
+        wrapper.style.width = '794px'; // A4-ish at 96dpi
+        wrapper.style.padding = '20px';
+        wrapper.style.background = '#fff';
+        wrapper.style.color = '#111';
+        wrapper.style.fontFamily = "'Noto Sans Devanagari', 'Arial', sans-serif";
+        wrapper.style.boxSizing = 'border-box';
+        wrapper.style.lineHeight = '1.4';
+        wrapper.style.fontSize = '14px';
+
+        // load Noto Sans Devanagari for good Devanagari rendering
+        const gf = document.createElement('link');
+        gf.rel = 'stylesheet';
+        gf.href = 'https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;700&display=swap';
+        document.head.appendChild(gf);
+
+        // Title
+        const h = document.createElement('h2');
+        h.textContent = 'OCR result';
+        h.style.margin = '0 0 12px 0';
+        wrapper.appendChild(h);
+
+        // include image preview (cropped if applied)
+        try {
+          if(preview && preview.src){
+            const imgEl = document.createElement('img');
+            imgEl.src = preview.src;
+            imgEl.style.maxWidth = '100%';
+            imgEl.style.display = 'block';
+            imgEl.style.marginBottom = '12px';
+            wrapper.appendChild(imgEl);
           }
-          doc.save('ocr-result.pdf');
+        } catch(e){ log('image include failed: ' + e); }
+
+        // text content
+        const pre = document.createElement('pre');
+        pre.textContent = text;
+        pre.style.whiteSpace = 'pre-wrap';
+        pre.style.fontFamily = wrapper.style.fontFamily;
+        pre.style.fontSize = '12px';
+        pre.style.margin = '0';
+        wrapper.appendChild(pre);
+
+        // put wrapper offscreen and wait for fonts to load
+        wrapper.style.position = 'fixed';
+        wrapper.style.left = '-9999px';
+        wrapper.style.top = '0';
+        document.body.appendChild(wrapper);
+        await new Promise(res => setTimeout(res, 600)); // small wait for font
+
+        try {
+          const canvas = await html2canvas(wrapper, { scale: 2, useCORS: true, allowTaint: true });
+          const imgData = canvas.toDataURL('image/png');
+
+          const { jsPDF } = window.jspdf || {};
+          if(!jsPDF){ showErr('jsPDF not loaded'); document.body.removeChild(wrapper); return; }
+          const pdf = new jsPDF({ unit: 'pt', format: 'a4' });
+          const pageWidth = pdf.internal.pageSize.getWidth();
+          const pageHeight = pdf.internal.pageSize.getHeight();
+
+          const canvasWidth = canvas.width;
+          const canvasHeight = canvas.height;
+          const ratio = pageWidth / canvasWidth;
+          const imgHeightOnPage = canvasHeight * ratio;
+
+          if (imgHeightOnPage <= pageHeight - 40) {
+            pdf.addImage(imgData, 'PNG', 20, 20, pageWidth - 40, imgHeightOnPage);
+          } else {
+            // multi-page
+            let remainingHeight = canvasHeight;
+            let position = 0;
+            const pageCanvasHeight = Math.floor((pageHeight - 40) / ratio);
+
+            while (remainingHeight > 0) {
+              const tmpCanvas = document.createElement('canvas');
+              tmpCanvas.width = canvas.width;
+              tmpCanvas.height = Math.min(pageCanvasHeight, remainingHeight);
+              const ctx = tmpCanvas.getContext('2d');
+              ctx.drawImage(canvas, 0, position, canvas.width, tmpCanvas.height, 0, 0, tmpCanvas.width, tmpCanvas.height);
+              const chunkData = tmpCanvas.toDataURL('image/png');
+              if (position > 0) pdf.addPage();
+              pdf.addImage(chunkData, 'PNG', 20, 20, pageWidth - 40, (tmpCanvas.height * ratio));
+              position += tmpCanvas.height;
+              remainingHeight -= tmpCanvas.height;
+            }
+          }
+
+          pdf.save('ocr-result.pdf');
         } catch(e){
-          showErr("PDF error: " + (e.message||e));
+          showErr('PDF error: ' + (e.message || e));
+        } finally {
+          // cleanup
+          document.body.removeChild(wrapper);
         }
       });
 
-      // NEW: Download as Word .doc (HTML-based doc)
+      // Download as Word .doc (HTML-based)
       downloadDoc.addEventListener('click', ()=>{
         const text = result.value || '';
         if(!text){ showErr("Nothing to export — run OCR first."); return; }
-        // Create a simple Word-compatible HTML document
         const title = "OCR result";
-        // Basic styling for Word
         const htmlContent = `
           <!doctype html>
           <html>
@@ -302,7 +373,7 @@
         const a = document.createElement('a'); a.href = url; a.download = 'ocr-result.doc'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
       });
 
-      // helper to escape HTML
+      // helper: escape HTML
       function escapeHtml(str){
         if(!str) return '';
         return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
@@ -313,6 +384,5 @@
 
   <!-- Cropper.js -->
   <script src="https://unpkg.com/cropperjs@1.5.13/dist/cropper.min.js"></script>
-  <!-- jsPDF is loaded earlier via dynamic loader; ensure it's available for PDF export -->
 </body>
 </html>
