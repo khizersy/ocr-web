@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Easy Image Text — Full</title>
+  <title>Easy Image Text — Edit (Crop/Delete)</title>
   <style>
     body{font-family:system-ui, -apple-system, "Segoe UI", Roboto, Arial; background:#f6f8fb; padding:18px}
     .container{max-width:1000px;margin:auto;background:#fff;padding:16px;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.06)}
@@ -18,7 +18,7 @@
     .sel-rect{position:absolute;border:2px dashed #0b74ff;background:rgba(11,116,255,0.08);pointer-events:none}
     #progressBar{height:8px;background:#eee;border-radius:6px;overflow:hidden;margin-top:8px}
     #progressBar i{display:block;height:100%;background:#0b74ff;width:0%;transition:width .15s}
-    textarea{width:100%;height:160px;margin-top:12px;padding:8px;font-family:monospace}
+    textarea{width:100%;height:140px;margin-top:12px;padding:8px;font-family:monospace}
     #cameraModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);align-items:center;justify-content:center;z-index:9999}
     #cameraModal .box{background:#fff;padding:10px;border-radius:8px;max-width:420px;width:95%;text-align:center}
     video{width:100%;border-radius:6px;background:#000}
@@ -28,7 +28,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>Easy Image Text — Full</h1>
+    <h1>Easy Image Text — Edit (Crop/Delete)</h1>
 
     <div class="row">
       <input id="fileInput" type="file" accept="image/*,application/pdf" multiple />
@@ -57,8 +57,7 @@
       <button id="recognizeAll" class="small">Recognize Text (OCR)</button>
       <button id="openCamera" class="small">Open Camera</button>
       <button id="clearAll" class="small">Clear All</button>
-      <button id="downloadAll" class="small">Download Images ZIP</button>
-      <span class="muted" style="margin-left:8px">Tip: Select Black & White to enable threshold slider.</span>
+      <span class="muted" style="margin-left:8px">Tip: After upload/capture you can adjust crop immediately.</span>
     </div>
 
     <div id="progressBar"><i id="progressFill"></i></div>
@@ -107,47 +106,49 @@
     let worker = null;
     let cameraStream = null;
 
-    // pdf.js worker
     if(window.pdfjsLib) window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
-    // helpers
     function setStatus(s){ statusText.textContent = 'Status: ' + s; }
     function makeBtn(text, cb){ const b=document.createElement('button'); b.className='small'; b.textContent=text; b.onclick=cb; return b; }
 
-    // create item (button closures capture item after object created)
-    function createCanvasItem(img, file){
+    // create item: auto-enable cropMode for uploads and camera captures
+    function createCanvasItem(img, file, autoCropMode = true){
       const wrap = document.createElement('div'); wrap.className='canvasItem';
       const c = document.createElement('canvas'); const ctx = c.getContext('2d');
       const actions = document.createElement('div'); actions.className='thumb-actions';
 
       const item = { file, img, canvas: c, ctx, wrap, filter: 'original', sel: null, cropMode: false };
 
-      // buttons (use item in closures)
+      // buttons: Crop, Apply, Cancel, Rotate, Delete
       const btnCrop = makeBtn('Crop', ()=> toggleCropMode(item));
       const btnApply = makeBtn('Apply', ()=> applyCrop(item));
       const btnCancel = makeBtn('Cancel', ()=> cancelCrop(item));
       const btnRotate = makeBtn('Rotate', ()=> rotateItem(item));
-      const btnDownload = makeBtn('Download', ()=> downloadImageItem(item));
+      const btnDelete = makeBtn('Delete', ()=> deleteItem(item));
 
       btnApply.style.display = 'none';
       btnCancel.style.display = 'none';
 
-      // append
-      actions.append(btnCrop, btnApply, btnCancel, btnRotate, btnDownload);
+      actions.append(btnCrop, btnApply, btnCancel, btnRotate, btnDelete);
+      item.btnApply = btnApply; item.btnCancel = btnCancel; item.actions = actions;
+
       wrap.appendChild(c);
       wrap.appendChild(actions);
-
-      // attach references
-      item.btnApply = btnApply; item.btnCancel = btnCancel; item.actions = actions;
 
       items.push(item);
       canvasGrid.appendChild(wrap);
       drawItem(item);
+
+      // auto open crop-mode if requested (true for camera and upload per request)
+      if(autoCropMode){
+        // slight delay so DOM & canvas size computed
+        setTimeout(()=>{ item.cropMode = true; item.btnApply.style.display = 'inline-block'; item.btnCancel.style.display = 'inline-block'; attachCropEvents(item); }, 120);
+      }
+
       updateThresholdEnabled();
       return item;
     }
 
-    // draw with filter
     function drawItem(item, maxW=800){
       const img = item.img; const c = item.canvas; const ctx = item.ctx;
       let w = img.width, h = img.height;
@@ -164,12 +165,11 @@
         default: ctx.filter='none'; ctx.drawImage(img,0,0,w,h);
       }
       ctx.restore();
-      if(item.cropMode) attachCropEvents(item);
       if(item.sel) drawSelectionOverlay(item);
+      if(item.cropMode) attachCropEvents(item);
     }
 
-    // binarize for BW
-    function binarize(ctx, w, h, threshold=128){
+    function binarize(ctx,w,h,threshold=128){
       try {
         const imgd = ctx.getImageData(0,0,w,h), d = imgd.data;
         for(let i=0;i<d.length;i+=4){
@@ -182,7 +182,6 @@
       } catch(e){ console.warn('binarize error', e); }
     }
 
-    // rotate 90deg clockwise
     function rotateItem(item){
       const c = item.canvas;
       const tmp = document.createElement('canvas');
@@ -197,7 +196,6 @@
       newImg.src = item.canvas.toDataURL('image/jpeg', 0.95);
     }
 
-    // Crop mode
     function toggleCropMode(item){
       item.cropMode = !item.cropMode;
       item.btnApply.style.display = item.cropMode ? 'inline-block' : 'none';
@@ -208,8 +206,7 @@
     function applyCrop(item){
       if(!item.sel) return alert('No selection');
       const s = item.sel;
-      const tmp = document.createElement('canvas');
-      tmp.width = s.w; tmp.height = s.h;
+      const tmp = document.createElement('canvas'); tmp.width = s.w; tmp.height = s.h;
       tmp.getContext('2d').drawImage(item.canvas, s.x, s.y, s.w, s.h, 0, 0, s.w, s.h);
       item.canvas.width = s.w; item.canvas.height = s.h;
       item.ctx.drawImage(tmp, 0, 0);
@@ -218,6 +215,7 @@
       item.sel = null; item.cropMode = false;
       item.btnApply.style.display = 'none'; item.btnCancel.style.display = 'none';
       clearOverlay(item);
+      updateThresholdEnabled();
     }
 
     function cancelCrop(item){
@@ -226,7 +224,6 @@
       clearOverlay(item);
     }
 
-    // overlay draw
     function drawSelectionOverlay(item){
       clearOverlay(item);
       if(!item.sel) return;
@@ -237,25 +234,23 @@
       const sh = (item.sel.h / item.canvas.height) * r.height;
       const rect = document.createElement('div');
       rect.className = 'sel-rect';
-      rect.style.left = sx + 'px';
-      rect.style.top = sy + 'px';
-      rect.style.width = Math.max(6, sw) + 'px';
-      rect.style.height = Math.max(6, sh) + 'px';
+      rect.style.left = sx + 'px'; rect.style.top = sy + 'px';
+      rect.style.width = Math.max(6, sw) + 'px'; rect.style.height = Math.max(6, sh) + 'px';
       rect.style.position = 'absolute';
       item._rect = rect;
       item.wrap.appendChild(rect);
     }
+
     function clearOverlay(item){ if(item._rect){ item._rect.remove(); item._rect = null; } }
 
-    // crop events (map screen to canvas pixels)
     function attachCropEvents(item){
       if(item._cropAttached) return;
       const c = item.canvas;
       let dragging = false, sx = 0, sy = 0;
       function getPos(e){
         const r = c.getBoundingClientRect();
-        let cx = (e.touches ? e.touches[0].clientX : e.clientX);
-        let cy = (e.touches ? e.touches[0].clientY : e.clientY);
+        const cx = (e.touches ? e.touches[0].clientX : e.clientX);
+        const cy = (e.touches ? e.touches[0].clientY : e.clientY);
         const x = Math.round(((cx - r.left) / r.width) * c.width);
         const y = Math.round(((cy - r.top) / r.height) * c.height);
         return {x,y};
@@ -264,8 +259,7 @@
         if(!item.cropMode) return;
         e.preventDefault();
         dragging = true;
-        const p = getPos(e);
-        sx = p.x; sy = p.y;
+        const p = getPos(e); sx = p.x; sy = p.y;
         item.sel = {x: sx, y: sy, w: 0, h: 0};
         drawSelectionOverlay(item);
       }
@@ -278,10 +272,9 @@
         item.sel = {x, y, w, h};
         drawSelectionOverlay(item);
       }
-      function onUp(e){
+      function onUp(){
         if(!dragging) return;
         dragging = false;
-        // ignore micro selections
         if(item.sel && (item.sel.w < 6 || item.sel.h < 6)){ item.sel = null; clearOverlay(item); }
       }
       c.addEventListener('mousedown', onDown);
@@ -305,11 +298,20 @@
         window.removeEventListener('mouseup', h.onUp);
         window.removeEventListener('touchend', h.onUp);
       } catch(e){}
-      item._cropAttached = false;
-      item._cropHandlers = null;
+      item._cropAttached = false; item._cropHandlers = null;
     }
 
-    // downloads single image
+    // Delete thumbnail
+    function deleteItem(item){
+      const i = items.indexOf(item);
+      if(i >= 0){
+        items.splice(i,1);
+        item.wrap.remove();
+        updateThresholdEnabled();
+      }
+    }
+
+    // download single image (kept as internal util if needed)
     function downloadImageItem(item){
       const link = document.createElement('a');
       link.href = item.canvas.toDataURL('image/jpeg', 0.95);
@@ -317,7 +319,7 @@
       link.click();
     }
 
-    // multi-image export to PDF
+    // multi-page PDF export
     document.getElementById('exportPdfMulti').addEventListener('click', ()=>{
       if(items.length === 0) return alert('Add images first');
       setStatus('Creating PDF...');
@@ -342,7 +344,7 @@
       } catch(err){ console.error(err); alert('PDF export error'); setStatus('PDF error'); }
     });
 
-    // OCR init with langPath -> Netlify friendly
+    // OCR worker
     async function ensureWorker(lang){
       if(worker) return worker;
       setStatus('Initializing OCR worker...');
@@ -350,24 +352,19 @@
         langPath: '/tessdata',
         logger: m => {
           if(m.status === 'recognizing text' && typeof m.progress === 'number'){
-            progressFill.style.width = Math.round(m.progress * 100) + '%';
-            setStatus('OCR: recognizing ' + Math.round(m.progress * 100) + '%');
+            progressFill.style.width = Math.round(m.progress*100) + '%';
+            setStatus('OCR: ' + Math.round(m.progress*100) + '%');
           } else if(m.status) setStatus('OCR: ' + m.status);
         }
       });
       await worker.load();
-      try {
-        await worker.loadLanguage(lang);
-        await worker.initialize(lang);
-      } catch(e){
-        console.warn('lang init failed', e);
-        await worker.loadLanguage('eng'); await worker.initialize('eng');
-      }
+      try { await worker.loadLanguage(lang); await worker.initialize(lang); }
+      catch(e){ console.warn('lang init failed', e); await worker.loadLanguage('eng'); await worker.initialize('eng'); }
       setStatus('OCR worker ready');
       return worker;
     }
 
-    // Recognize all canvases sequentially
+    // Recognize all canvases
     document.getElementById('recognizeAll').addEventListener('click', async ()=>{
       if(items.length === 0) return alert('Add images');
       const lang = langSelect.value || 'eng';
@@ -389,7 +386,7 @@
       } catch(err){ console.error(err); setStatus('OCR error'); alert('OCR error: ' + (err.message || err)); }
     });
 
-    // file input (images & pdfs)
+    // file input (images & pdfs). autoCropMode true so upload immediately allows crop adjust
     fileInput.addEventListener('change', async (ev)=>{
       const files = Array.from(ev.target.files || []);
       if(files.length === 0) return;
@@ -408,20 +405,20 @@
               await page.render({ canvasContext: tmp.getContext('2d'), viewport: vp }).promise;
               const img = new Image(); img.src = tmp.toDataURL('image/jpeg', 0.9);
               await new Promise(res => img.onload = res);
-              createCanvasItem(img, f);
+              createCanvasItem(img, f, true); // auto-enable crop
             }
           } catch(e){ console.error('PDF load error', e); alert('PDF load error: ' + (e.message || e)); }
         } else {
           const url = URL.createObjectURL(f);
           const img = new Image();
-          img.onload = ()=> { createCanvasItem(img, f); URL.revokeObjectURL(url); };
+          img.onload = ()=> { createCanvasItem(img, f, true); URL.revokeObjectURL(url); };
           img.src = url;
         }
       }
       setStatus('Files loaded');
     });
 
-    // global filter buttons
+    // global filters and controls
     document.getElementById('btnOriginal').onclick = ()=> applyFilterToAll('original');
     document.getElementById('btnNoShadow').onclick = ()=> applyFilterToAll('no-shadow');
     document.getElementById('btnLighten').onclick = ()=> applyFilterToAll('lighten');
@@ -431,7 +428,6 @@
     document.getElementById('btnEco').onclick = ()=> applyFilterToAll('eco');
     document.getElementById('autoCrop').onclick = ()=> items.forEach(it => autoCropItem(it));
     document.getElementById('clearAll').onclick = ()=> { items = []; canvasGrid.innerHTML=''; resultText.value=''; setStatus('Cleared'); progressFill.style.width='0%'; updateThresholdEnabled(); };
-    document.getElementById('downloadAll').onclick = ()=> { if(items.length===0) return alert('No images'); items.forEach(it=>downloadImageItem(it)); };
 
     function applyFilterToAll(filterName){ items.forEach(it => { it.filter = filterName; drawItem(it); }); updateThresholdEnabled(); }
 
@@ -442,7 +438,7 @@
     }
     thSlider.addEventListener('input', ()=>{ thVal.textContent = thSlider.value; items.forEach(it => { if(it.filter === 'bw') drawItem(it); }) });
 
-    // simple auto-crop (bounding box)
+    // simple auto-crop heuristic
     function autoCropItem(item){
       try {
         const c = item.canvas; const ctx = item.ctx;
@@ -467,7 +463,7 @@
       } catch(e){ console.warn('autoCrop error', e); alert('Auto-crop error'); }
     }
 
-    // camera capture
+    // camera capture -> auto crop mode
     openCameraBtn.addEventListener('click', async ()=>{
       try {
         cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
@@ -480,53 +476,17 @@
       if(!cameraVideo.videoWidth) return alert('Camera not ready');
       const tmp = document.createElement('canvas'); tmp.width = cameraVideo.videoWidth; tmp.height = cameraVideo.videoHeight;
       tmp.getContext('2d').drawImage(cameraVideo, 0, 0, tmp.width, tmp.height);
-      const img = new Image(); img.onload = ()=> createCanvasItem(img, new File([], 'camera.jpg', { type: 'image/jpeg' }));
+      const img = new Image();
+      img.onload = ()=> createCanvasItem(img, new File([], 'camera.jpg', { type: 'image/jpeg' }), true); // autoCropMode true
       img.src = tmp.toDataURL('image/jpeg', 0.95);
       stopCamera();
     });
-    function stopCamera(){
-      if(cameraStream){ cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
-      cameraVideo.srcObject = null; cameraModal.style.display = 'none'; cameraModal.setAttribute('aria-hidden', 'true');
-    }
+    function stopCamera(){ if(cameraStream){ cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; } cameraVideo.srcObject = null; cameraModal.style.display = 'none'; cameraModal.setAttribute('aria-hidden', 'true'); }
 
-    // expose createCanvasItem globally (for debug)
+    // expose createCanvasItem for debug
     window.createCanvasItem = createCanvasItem;
 
-    // ensure worker: only on-demand
-    async function ensureWorker(lang){
-      return ensureWorkerInternal(lang);
-    }
-    // small indirection to avoid duplicate declaration issues
-    async function ensureWorkerInternal(lang){
-      if(worker) return worker;
-      worker = window.Tesseract.createWorker({
-        langPath: '/tessdata',
-        logger: m => { if(m.status === 'recognizing text' && typeof m.progress === 'number'){ progressFill.style.width = Math.round(m.progress*100) + '%'; setStatus('OCR: ' + Math.round(m.progress*100) + '%'); } else if(m.status) setStatus('OCR: ' + m.status); }
-      });
-      await worker.load();
-      try { await worker.loadLanguage(lang); await worker.initialize(lang); }
-      catch(e){ console.warn('lang init failed', e); await worker.loadLanguage('eng'); await worker.initialize('eng'); }
-      setStatus('OCR worker ready');
-      return worker;
-    }
-
-    // helper: download single or multiple images (simple)
-    function downloadImageItem(item){
-      const a = document.createElement('a'); a.href = item.canvas.toDataURL('image/jpeg', 0.95);
-      a.download = (item.file && item.file.name) ? ('processed-' + item.file.name) : 'processed.jpg'; a.click();
-    }
-
-    // handle drag & drop event (optional)
-    document.addEventListener('dragover', e => e.preventDefault());
-    document.addEventListener('drop', e => {
-      e.preventDefault();
-      if(e.dataTransfer && e.dataTransfer.files) {
-        fileInput.files = e.dataTransfer.files;
-        const ev = new Event('change'); fileInput.dispatchEvent(ev);
-      }
-    });
-
-    // init simple UI state
+    // initial status
     setStatus('idle');
 
   })();
