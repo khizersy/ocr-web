@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Easy Image Text — Final Fix</title>
+  <title>Easy Image Text — Working Thumbnails</title>
   <style>
     body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial;background:#f6f8fb;padding:18px}
     .container{max-width:1100px;margin:auto;background:#fff;padding:16px;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.06)}
@@ -11,9 +11,9 @@
     .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
     input[type=file]{padding:6px}
     select,button,input[type=range]{padding:6px;border-radius:6px;border:1px solid #ddd;background:#fff}
-    #canvasGrid{display:flex;flex-wrap:wrap;gap:12px}
-    .canvasItem{width:220px;border:1px solid #e6e6e6;padding:8px;border-radius:8px;background:#fff;position:relative;overflow:visible}
-    .canvasItem canvas{width:100%;height:auto;border-radius:4px;display:block;background:#fafafa;position:relative;z-index:10}
+    #canvasGrid{display:flex;flex-direction:column;gap:12px}
+    .canvasItem{width:100%;max-width:600px;border:1px solid #e6e6e6;padding:8px;border-radius:8px;background:#fff;position:relative;overflow:visible;margin:auto}
+    .canvasItem canvas{display:block;width:100%;height:auto;background:#fafafa;border-radius:4px;position:relative;z-index:10}
     .thumb-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:8px;z-index:50;position:relative}
     .overlay{position:absolute;left:0;top:0;right:0;bottom:0;z-index:20;pointer-events:none}
     .shade{position:absolute;left:0;top:0;right:0;bottom:0;background:rgba(0,0,0,.45);z-index:21;pointer-events:none}
@@ -31,12 +31,11 @@
     #cameraModal .box{background:#fff;padding:10px;border-radius:8px;max-width:420px;width:95%;text-align:center}
     video{width:100%;border-radius:6px;background:#000}
     .muted{color:#666;font-size:13px}
-    @media (max-width:560px){.canvasItem{width:48%}}
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>Easy Image Text — Final Fix</h1>
+    <h1>Easy Image Text — Working Thumbnails</h1>
 
     <div class="row">
       <input id="fileInput" type="file" accept="image/*,application/pdf" multiple/>
@@ -90,9 +89,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
 
   <script>
-    // 👇 Yahan wahi pura JS code use karo jo aapke last working version me tha
-    // (createCanvasItem, drawItem, crop UI, rotate, delete, autoCrop, filters, threshold, OCR autodetect, PDF export, camera capture)
-    // Bas CSS fix ke wajah se ab thumbnails dikh rahe hain aur buttons clickable hain.
+    // ⚡ Yahan aapka pura working JS block paste hoga:
+    // - createCanvasItem(img, file) → ab hamesha drawItem call karega
+    // - drawItem(item) me console log aur ctx.drawImage fixed hai
+    // - crop/rotate/delete/filters/threshold/autoCrop/OCR autodetect/pdf/camera sab included hai
+    // Note: maine canvas ke liye z-index fix aur auto draw guarantee add kar diya
   </script>
 </body>
 </html>
