@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Easy Image Text — Filters, Multi-Page PDF, Camera & OCR</title>
+  <title>Easy Image Text — Filters, Crop, Rotate, Multi-PDF, Camera & OCR</title>
   <style>
     body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial; padding:18px; background:#f6f8fb; color:#111; }
-    .container { max-width:980px; margin:auto; background:white; padding:16px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.06); }
+    .container { max-width:1100px; margin:auto; background:white; padding:16px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.06); }
     h1 { margin:4px 0 12px; font-size:20px }
     .controls > * { margin-right:8px; margin-bottom:8px; }
-    #canvasGrid { display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; }
-    .canvasItem { border:1px solid #e6e6e6; padding:6px; border-radius:6px; background:#fff; min-width:180px; }
-    .canvasItem canvas { max-width:100%; height:auto; display:block; background:#fafafa; }
-    textarea { width:100%; height:150px; margin-top:12px; padding:8px; font-family:monospace; }
+    #canvasGrid { display:flex; gap:12px; flex-wrap:wrap; margin-top:10px; }
+    .canvasItem { border:1px solid #e6e6e6; padding:8px; border-radius:8px; background:#fff; min-width:220px; width:220px; box-sizing:border-box; position:relative; }
+    .canvasItem canvas { width:100%; height:auto; display:block; background:#fafafa; border-radius:4px; }
+    textarea { width:100%; height:140px; margin-top:12px; padding:8px; font-family:monospace; }
     .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
     button { padding:8px 10px; border-radius:6px; border:1px solid #ddd; background:#fff; cursor:pointer; }
     button.primary { background:#0b74ff; color:white; border-color:#0b74ff; }
@@ -21,8 +21,11 @@
     #progressBar { height:8px; background:#eee; border-radius:6px; overflow:hidden; margin-top:8px; }
     #progressBar > i { display:block; height:100%; background:#0b74ff; width:0%; transition:width .2s ease; }
     .muted { color:#666; font-size:13px; }
-    .thumb-actions { margin-top:6px; display:flex; gap:6px; align-items:center; justify-content:center; }
+    .thumb-actions { margin-top:8px; display:flex; gap:6px; align-items:center; justify-content:center; flex-wrap:wrap; }
     input[type="range"] { width:160px; }
+    /* crop overlay */
+    .crop-overlay { position:absolute; top:8px; left:8px; right:8px; bottom:48px; pointer-events:none; }
+    .sel-rect { position:absolute; border:2px dashed #0b74ff; background: rgba(11,116,255,0.08); pointer-events:none; }
     /* camera modal */
     #cameraModal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); align-items:center; justify-content:center; z-index:9999; }
     #cameraModal .box { background:#fff; padding:10px; border-radius:8px; max-width:420px; width:95%; text-align:center; }
@@ -31,7 +34,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>Easy Image Text — Filters, Multi-Page PDF, Camera & OCR</h1>
+    <h1>Easy Image Text — Filters, Crop, Rotate, Multi-Page PDF, Camera & OCR</h1>
 
     <div class="row controls">
       <input id="fileInput" type="file" accept="image/*,application/pdf" multiple />
@@ -52,7 +55,7 @@
       <button id="btnGray" class="small">Grayscale</button>
       <button id="btnBW" class="small">Black & White</button>
       <button id="btnEco" class="small">Eco</button>
-      <button id="autoCrop" class="small">Auto-Crop (edges)</button>
+      <button id="autoCrop" class="small">Auto-Crop</button>
     </div>
 
     <div class="row" style="margin-top:8px;">
@@ -60,7 +63,7 @@
       <button id="runOCR" class="small">Recognize Text (OCR)</button>
       <button id="openCamera" class="small">Open Camera</button>
       <button id="clearAll" class="small">Clear All</button>
-      <label class="muted" id="hint">Tip: On mobile use file input camera. Multiple images create multi-page PDF.</label>
+      <label class="muted" id="hint">Tip: On mobile use file input camera. Select 'Black & White' to use threshold.</label>
     </div>
 
     <div id="progressBar"><i id="progressFill"></i></div>
@@ -105,7 +108,7 @@
     const cameraCapture = document.getElementById('cameraCapture');
     const cameraClose = document.getElementById('cameraClose');
 
-    let items = []; // { file, img, canvas, ctx, filter, wrap }
+    let items = []; // { file, img, canvas, ctx, filter, wrap, cropMode, sel }
     let worker = null;
     let cameraStream = null;
 
@@ -116,35 +119,49 @@
 
     function setStatus(s){ statusText.textContent = 'Status: ' + s; }
 
-    thSlider.addEventListener('input', ()=>{ thVal.textContent = thSlider.value; });
+    // threshold slider enable/disable depending on whether any item uses 'bw' filter or global bw applied
+    function updateThresholdEnabled(){
+      // enable if any item filtered as BW OR if global BW button was clicked recently: we'll check items
+      const anyBW = items.some(it=>it.filter==='bw');
+      thSlider.disabled = !anyBW;
+      thVal.style.opacity = anyBW ? '1' : '0.5';
+    }
+
+    thSlider.addEventListener('input', ()=>{ thVal.textContent = thSlider.value; items.forEach(it=>{ if(it.filter==='bw') drawItem(it); }); });
 
     // create canvas item
     function createCanvasItem(img, file){
       const wrap = document.createElement('div'); wrap.className='canvasItem';
+      // container for overlay
+      const overlay = document.createElement('div'); overlay.className='crop-overlay';
+      wrap.appendChild(overlay);
       const c = document.createElement('canvas'); const ctx = c.getContext('2d');
       wrap.appendChild(c);
       const actions = document.createElement('div'); actions.className='thumb-actions';
-      const btnOrig = makeBtn('Original', ()=>{ item.filter='original'; drawItem(item); });
-      const btnBW = makeBtn('BW', ()=>{ item.filter='bw'; drawItem(item); });
-      const btnCrop = makeBtn('Crop', ()=>autoCropItem(item));
+      const btnOrig = makeBtn('Original', ()=>{ item.filter='original'; drawItem(item); updateThresholdEnabled(); });
+      const btnBW = makeBtn('BW', ()=>{ item.filter='bw'; drawItem(item); updateThresholdEnabled(); });
+      const btnRotate = makeBtn('Rotate', ()=>{ rotateItem(item); });
+      const btnCrop = makeBtn('Crop', ()=>{ toggleCropMode(item); });
       const btnDel = makeBtn('Delete', ()=>{ removeItem(item); });
-      actions.appendChild(btnOrig); actions.appendChild(btnBW); actions.appendChild(btnCrop); actions.appendChild(btnDel);
+      actions.appendChild(btnOrig); actions.appendChild(btnBW); actions.appendChild(btnRotate); actions.appendChild(btnCrop); actions.appendChild(btnDel);
       wrap.appendChild(actions);
 
-      const item = { file, img, canvas: c, ctx, filter: 'original', wrap };
+      const item = { file, img, canvas: c, ctx, filter: 'original', wrap, overlay, cropMode:false, sel:null, touchStart:null };
       items.push(item);
       canvasGrid.appendChild(wrap);
       drawItem(item);
+      updateThresholdEnabled();
       return item;
     }
 
     function makeBtn(text, cb){ const b=document.createElement('button'); b.className='small'; b.textContent=text; b.onclick=cb; return b; }
 
-    function drawItem(item, scaleMaxWidth=1200){
+    function drawItem(item, scaleMaxWidth=800){
       const img = item.img; const canvas = item.canvas; const ctx = item.ctx;
       let w = img.width, h = img.height;
       if (w > scaleMaxWidth) { h = Math.round(h * (scaleMaxWidth / w)); w = scaleMaxWidth; }
       canvas.width = w; canvas.height = h;
+      // draw full-size then apply filter processing
       ctx.save();
       switch(item.filter){
         case 'original': ctx.filter='none'; ctx.drawImage(img,0,0,w,h); break;
@@ -153,19 +170,35 @@
         case 'magic': ctx.filter='saturate(1.4) contrast(1.1) brightness(1.05)'; ctx.drawImage(img,0,0,w,h); break;
         case 'grayscale': ctx.filter='grayscale(1)'; ctx.drawImage(img,0,0,w,h); break;
         case 'eco': ctx.filter='grayscale(1) contrast(0.9) brightness(0.95)'; ctx.drawImage(img,0,0,w,h); break;
-        case 'bw': ctx.filter='none'; ctx.drawImage(img,0,0,w,h); binarize(ctx,w,h,parseInt(thSlider.value,10)); break;
+        case 'bw':
+          ctx.filter='none'; ctx.drawImage(img,0,0,w,h);
+          binarize(ctx,w,h,parseInt(thSlider.value,10));
+          break;
         default: ctx.filter='none'; ctx.drawImage(img,0,0,w,h);
       }
       ctx.restore();
+      // if crop mode active, draw selection overlay
+      if(item.cropMode && item.sel){
+        drawSelectionOverlay(item);
+        attachCropEvents(item);
+      } else {
+        removeCropEvents(item);
+        clearOverlay(item);
+      }
     }
 
-    function applyFilterToAll(filterName){ items.forEach(it=>{ it.filter=filterName; drawItem(it); }); }
-    function removeItem(item){ const idx = items.indexOf(item); if(idx>=0){ items.splice(idx,1); item.wrap.remove(); } }
+    function applyFilterToAll(filterName){ items.forEach(it=>{ it.filter=filterName; drawItem(it); }); updateThresholdEnabled(); }
+    function removeItem(item){ const idx = items.indexOf(item); if(idx>=0){ items.splice(idx,1); item.wrap.remove(); updateThresholdEnabled(); } }
 
     function binarize(ctx,w,h,threshold=128){
       try{
         const imgd = ctx.getImageData(0,0,w,h); const d = imgd.data;
-        for(let i=0;i<d.length;i+=4){ const r=d[i], g=d[i+1], b=d[i+2]; const lum = 0.299*r + 0.587*g + 0.114*b; const v = lum >= threshold ? 255 : 0; d[i]=d[i+1]=d[i+2]=v; }
+        for(let i=0;i<d.length;i+=4){
+          const r=d[i], g=d[i+1], b=d[i+2];
+          const lum = 0.299*r + 0.587*g + 0.114*b;
+          const v = lum >= threshold ? 255 : 0;
+          d[i]=d[i+1]=d[i+2]=v;
+        }
         ctx.putImageData(imgd,0,0);
       } catch(e){ console.warn('binarize fail', e); }
     }
@@ -190,10 +223,141 @@
         const nw = maxX - minX, nh = maxY - minY;
         const tmp = document.createElement('canvas'); tmp.width=nw; tmp.height=nh;
         const tctx = tmp.getContext('2d'); tctx.drawImage(c, minX, minY, nw, nh, 0, 0, nw, nh);
-        // replace
         item.canvas.width = nw; item.canvas.height = nh; item.ctx.drawImage(tmp,0,0);
         const newImg = new Image(); newImg.onload = ()=>{ item.img = newImg; drawItem(item); }; newImg.src = item.canvas.toDataURL('image/jpeg',0.9);
       } catch(e){ console.warn('autocrop error', e); alert('Auto-crop error'); }
+    }
+
+    // rotate item 90 degrees clockwise
+    function rotateItem(item){
+      const c = item.canvas; const ctx = item.ctx;
+      const w = c.width, h = c.height;
+      const tmp = document.createElement('canvas'); tmp.width = h; tmp.height = w;
+      const tctx = tmp.getContext('2d');
+      tctx.translate(h/2, w/2); tctx.rotate(90 * Math.PI / 180); tctx.drawImage(c, -w/2, -h/2);
+      // replace item canvas content & image
+      item.canvas.width = tmp.width; item.canvas.height = tmp.height;
+      item.ctx.drawImage(tmp,0,0);
+      const newImg = new Image(); newImg.onload = ()=>{ item.img = newImg; drawItem(item); }; newImg.src = item.canvas.toDataURL('image/jpeg',0.95);
+    }
+
+    // Crop mode handlers
+    function toggleCropMode(item){
+      item.cropMode = !item.cropMode;
+      if(item.cropMode){
+        item.sel = null;
+        setStatus('Crop mode ON — drag to select area on the thumbnail. Then click Apply Crop or Cancel Crop.');
+        // add apply/cancel buttons to item's actions bar
+        const applyBtn = makeBtn('Apply Crop', ()=>{ applyCrop(item); });
+        applyBtn.dataset._applyCrop = '1';
+        const cancelBtn = makeBtn('Cancel Crop', ()=>{ cancelCrop(item); });
+        cancelBtn.dataset._cancelCrop = '1';
+        item.wrap.querySelector('.thumb-actions').appendChild(applyBtn);
+        item.wrap.querySelector('.thumb-actions').appendChild(cancelBtn);
+      } else {
+        cancelCrop(item);
+      }
+      drawItem(item);
+    }
+
+    function applyCrop(item){
+      if(!item.sel) return alert('Pehle selection karo');
+      const s = item.sel; const c = item.canvas; const ctx = item.ctx;
+      const tmp = document.createElement('canvas'); tmp.width = s.w; tmp.height = s.h;
+      tmp.getContext('2d').drawImage(c, s.x, s.y, s.w, s.h, 0, 0, s.w, s.h);
+      item.canvas.width = tmp.width; item.canvas.height = tmp.height;
+      item.ctx.drawImage(tmp,0,0);
+      const newImg = new Image(); newImg.onload = ()=>{ item.img = newImg; item.cropMode=false; removeCropButtons(item); drawItem(item); }; newImg.src = item.canvas.toDataURL('image/jpeg',0.95);
+    }
+
+    function cancelCrop(item){
+      item.cropMode = false; item.sel = null; removeCropButtons(item); drawItem(item);
+    }
+
+    function removeCropButtons(item){
+      const actions = item.wrap.querySelector('.thumb-actions');
+      const toRemove = Array.from(actions.querySelectorAll('button')).filter(b=>b.dataset._applyCrop||b.dataset._cancelCrop);
+      toRemove.forEach(b=>b.remove());
+    }
+
+    function clearOverlay(item){ item.overlay.innerHTML=''; }
+    function drawSelectionOverlay(item){
+      // render selection rectangle within overlay (scaled to canvas display)
+      const overlay = item.overlay; overlay.innerHTML='';
+      if(!item.sel) return;
+      const rect = document.createElement('div'); rect.className='sel-rect';
+      // compute CSS percent position relative to overlay
+      const c = item.canvas; const rectCanvas = item.sel;
+      const displayW = item.canvas.clientWidth, displayH = item.canvas.clientHeight;
+      const cssX = (rectCanvas.x / c.width) * displayW;
+      const cssY = (rectCanvas.y / c.height) * displayH;
+      const cssW = (rectCanvas.w / c.width) * displayW;
+      const cssH = (rectCanvas.h / c.height) * displayH;
+      rect.style.left = cssX + 'px'; rect.style.top = cssY + 'px';
+      rect.style.width = Math.max(10, cssW) + 'px'; rect.style.height = Math.max(10, cssH) + 'px';
+      overlay.appendChild(rect);
+    }
+
+    // attach mouse/touch events to canvas for crop selection
+    function attachCropEvents(item){
+      const c = item.canvas;
+      if(item._cropAttached) return;
+      item._cropAttached = true;
+      let dragging = false, startX=0, startY=0;
+      function getPos(e){
+        const r = c.getBoundingClientRect();
+        let clientX = e.clientX, clientY = e.clientY;
+        if(e.touches && e.touches[0]){ clientX = e.touches[0].clientX; clientY = e.touches[0].clientY; }
+        const x = Math.round(((clientX - r.left) / r.width) * c.width);
+        const y = Math.round(((clientY - r.top) / r.height) * c.height);
+        return { x, y };
+      }
+      function onDown(e){
+        e.preventDefault();
+        if(!item.cropMode) return;
+        dragging = true;
+        const p = getPos(e);
+        startX = p.x; startY = p.y;
+        item.sel = { x:startX, y:startY, w:0, h:0 };
+        drawSelectionOverlay(item);
+      }
+      function onMove(e){
+        if(!dragging || !item.cropMode) return;
+        const p = getPos(e);
+        const x = Math.min(startX, p.x), y = Math.min(startY, p.y);
+        const w = Math.abs(p.x - startX), h = Math.abs(p.y - startY);
+        item.sel = { x, y, w, h };
+        drawSelectionOverlay(item);
+      }
+      function onUp(e){
+        if(!dragging) return;
+        dragging = false;
+        if(item.sel && (item.sel.w < 5 || item.sel.h < 5)){ item.sel = null; drawSelectionOverlay(item); }
+      }
+      c.addEventListener('mousedown', onDown);
+      c.addEventListener('touchstart', onDown, {passive:false});
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('touchmove', onMove, {passive:false});
+      window.addEventListener('mouseup', onUp);
+      window.addEventListener('touchend', onUp);
+      // store references so we can remove later
+      item._cropHandlers = { onDown, onMove, onUp };
+    }
+
+    function removeCropEvents(item){
+      if(!item._cropAttached) return;
+      const c = item.canvas;
+      const h = item._cropHandlers || {};
+      c.removeEventListener('mousedown', h.onDown);
+      c.removeEventListener('touchstart', h.onDown);
+      window.removeEventListener('mousemove', h.onMove);
+      window.removeEventListener('touchmove', h.onMove);
+      window.removeEventListener('mouseup', h.onUp);
+      window.removeEventListener('touchend', h.onUp);
+      item._cropAttached = false;
+      item._cropHandlers = null;
+      item.sel = item.sel; // keep selection if any
+      clearOverlay(item);
     }
 
     // file input (images & pdfs)
@@ -234,7 +398,7 @@
     document.getElementById('btnBW').onclick = ()=>applyFilterToAll('bw');
     document.getElementById('btnEco').onclick = ()=>applyFilterToAll('eco');
     document.getElementById('autoCrop').onclick = ()=>items.forEach(it=>autoCropItem(it));
-    document.getElementById('clearAll').onclick = ()=>{ items=[]; canvasGrid.innerHTML=''; resultText.value=''; setStatus('Cleared'); progressFill.style.width='0%'; };
+    document.getElementById('clearAll').onclick = ()=>{ items=[]; canvasGrid.innerHTML=''; resultText.value=''; setStatus('Cleared'); progressFill.style.width='0%'; updateThresholdEnabled(); };
 
     // Export multi-page PDF
     document.getElementById('exportPdfMulti').onclick = ()=>{
@@ -317,7 +481,7 @@
     // safe cleanup before unload
     window.addEventListener('beforeunload', ()=>{ if(worker) worker.terminate && worker.terminate(); if(cameraStream) stopCamera(); });
 
-    // expose createCanvasItem globally for future use (optional)
+    // expose createCanvasItem globally for any external code (optional)
     window.createCanvasItem = createCanvasItem;
 
   })();
