@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Easy Image Text — Crop Fix</title>
+  <title>Easy Image Text — Crop Fixed</title>
   <style>
     body { font-family: system-ui, sans-serif; padding:18px; background:#f6f8fb; }
     .container { max-width:1100px; margin:auto; background:white; padding:16px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.06); }
@@ -18,7 +18,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>Easy Image Text — Crop Fix</h1>
+    <h1>Easy Image Text — Crop Fixed</h1>
     <input id="fileInput" type="file" accept="image/*" multiple />
     <button id="runOCR">OCR</button>
     <div id="progressBar"><i id="progressFill"></i></div>
@@ -37,42 +37,69 @@
     let items = [];
     let worker=null;
 
-    function createCanvasItem(img,file){
-      const wrap=document.createElement('div'); wrap.className='canvasItem';
-      const c=document.createElement('canvas'); const ctx=c.getContext('2d');
-      wrap.appendChild(c);
-      const actions=document.createElement('div'); actions.className='thumb-actions';
+    function makeBtn(txt, cb){
+      const b=document.createElement('button');
+      b.textContent=txt;
+      b.onclick=cb;
+      return b;
+    }
+
+    function createCanvasItem(img, file){
+      const wrap=document.createElement('div');
+      wrap.className='canvasItem';
+      const c=document.createElement('canvas');
+      const ctx=c.getContext('2d');
+
+      // create item first
+      const item={file,img,canvas:c,ctx,wrap,filter:'original',cropMode:false,sel:null,btnCrop:null,btnApply:null,btnCancel:null};
+
+      // buttons referencing item
+      const actions=document.createElement('div');
+      actions.className='thumb-actions';
       const btnCrop=makeBtn('Crop',()=>toggleCropMode(item));
       const btnApply=makeBtn('Apply Crop',()=>applyCrop(item));
       const btnCancel=makeBtn('Cancel Crop',()=>cancelCrop(item));
-      btnApply.style.display='none'; btnCancel.style.display='none';
+      btnApply.style.display='none';
+      btnCancel.style.display='none';
       const btnRotate=makeBtn('Rotate',()=>rotateItem(item));
       actions.append(btnCrop,btnApply,btnCancel,btnRotate);
+
+      // assign to item
+      item.btnCrop=btnCrop;
+      item.btnApply=btnApply;
+      item.btnCancel=btnCancel;
+
+      // assemble
+      wrap.appendChild(c);
       wrap.appendChild(actions);
 
-      const item={file,img,canvas:c,ctx,wrap,filter:'original',cropMode:false,sel:null,btnCrop,btnApply,btnCancel};
-      items.push(item); canvasGrid.appendChild(wrap); drawItem(item); return item;
+      items.push(item);
+      canvasGrid.appendChild(wrap);
+      drawItem(item);
+      return item;
     }
-    function makeBtn(txt,cb){const b=document.createElement('button');b.textContent=txt;b.onclick=cb;return b;}
 
     function drawItem(item){
       const {img,canvas,ctx}=item;
-      let w=img.width,h=img.height; if(w>800){h=Math.round(h*(800/w));w=800;}
+      let w=img.width,h=img.height;
+      if(w>800){h=Math.round(h*(800/w)); w=800;}
       canvas.width=w; canvas.height=h;
       ctx.drawImage(img,0,0,w,h);
       if(item.cropMode && item.sel){ drawSelectionOverlay(item); }
     }
 
     function rotateItem(item){
-      const c=item.canvas,ctx=item.ctx;
-      const tmp=document.createElement('canvas'); tmp.width=c.height; tmp.height=c.width;
+      const c=item.canvas;
+      const tmp=document.createElement('canvas');
+      tmp.width=c.height; tmp.height=c.width;
       const tctx=tmp.getContext('2d');
       tctx.translate(tmp.width/2,tmp.height/2);
       tctx.rotate(90*Math.PI/180);
       tctx.drawImage(c,-c.width/2,-c.height/2);
       item.canvas.width=tmp.width; item.canvas.height=tmp.height;
       item.ctx.drawImage(tmp,0,0);
-      const newImg=new Image(); newImg.onload=()=>{item.img=newImg;drawItem(item);};
+      const newImg=new Image();
+      newImg.onload=()=>{item.img=newImg; drawItem(item);};
       newImg.src=item.canvas.toDataURL('image/jpeg',0.9);
     }
 
@@ -80,33 +107,51 @@
       item.cropMode=!item.cropMode;
       item.btnApply.style.display=item.cropMode?'inline-block':'none';
       item.btnCancel.style.display=item.cropMode?'inline-block':'none';
-      if(item.cropMode){ attachCropEvents(item); } else { removeCropEvents(item); clearOverlay(item); }
+      if(item.cropMode){ attachCropEvents(item); } 
+      else { removeCropEvents(item); clearOverlay(item); }
     }
+
     function applyCrop(item){
       if(!item.sel) return alert('No selection');
-      const s=item.sel,c=item.canvas,ctx=item.ctx;
-      const tmp=document.createElement('canvas'); tmp.width=s.w; tmp.height=s.h;
+      const s=item.sel,c=item.canvas;
+      const tmp=document.createElement('canvas');
+      tmp.width=s.w; tmp.height=s.h;
       tmp.getContext('2d').drawImage(c,s.x,s.y,s.w,s.h,0,0,s.w,s.h);
-      item.canvas.width=s.w; item.canvas.height=s.h; item.ctx.drawImage(tmp,0,0);
-      const newImg=new Image(); newImg.onload=()=>{item.img=newImg; item.cropMode=false; drawItem(item);};
+      item.canvas.width=s.w; item.canvas.height=s.h;
+      item.ctx.drawImage(tmp,0,0);
+      const newImg=new Image();
+      newImg.onload=()=>{item.img=newImg; item.cropMode=false; drawItem(item);};
       newImg.src=item.canvas.toDataURL('image/jpeg',0.9);
-      item.btnApply.style.display='none'; item.btnCancel.style.display='none';
+      item.btnApply.style.display='none';
+      item.btnCancel.style.display='none';
     }
-    function cancelCrop(item){ item.cropMode=false; item.sel=null; clearOverlay(item); item.btnApply.style.display='none'; item.btnCancel.style.display='none'; }
+
+    function cancelCrop(item){
+      item.cropMode=false; item.sel=null;
+      clearOverlay(item);
+      item.btnApply.style.display='none';
+      item.btnCancel.style.display='none';
+    }
 
     function drawSelectionOverlay(item){
       clearOverlay(item);
-      const rect=document.createElement('div'); rect.className='sel-rect';
+      const rect=document.createElement('div');
+      rect.className='sel-rect';
       const r=item.canvas.getBoundingClientRect();
-      const scaleX=r.width/item.canvas.width, scaleY=r.height/item.canvas.height;
+      const scaleX=r.width/item.canvas.width;
+      const scaleY=r.height/item.canvas.height;
       rect.style.left=(item.sel.x*scaleX)+'px';
       rect.style.top=(item.sel.y*scaleY)+'px';
       rect.style.width=(item.sel.w*scaleX)+'px';
       rect.style.height=(item.sel.h*scaleY)+'px';
       rect.style.position='absolute';
-      item.wrap.appendChild(rect); item._rect=rect;
+      item.wrap.appendChild(rect);
+      item._rect=rect;
     }
-    function clearOverlay(item){ if(item._rect){item._rect.remove(); item._rect=null;} }
+
+    function clearOverlay(item){
+      if(item._rect){ item._rect.remove(); item._rect=null; }
+    }
 
     function attachCropEvents(item){
       if(item._cropAttached) return;
@@ -118,13 +163,14 @@
         if(e.touches){cx=e.touches[0].clientX; cy=e.touches[0].clientY;}
         return {x:Math.round((cx-r.left)/r.width*c.width), y:Math.round((cy-r.top)/r.height*c.height)};
       }
-      function onDown(e){ if(!item.cropMode)return; dragging=true; const p=getPos(e); sx=p.x; sy=p.y; item.sel={x:sx,y:sy,w:0,h:0}; drawSelectionOverlay(item); }
-      function onMove(e){ if(!dragging)return; const p=getPos(e); item.sel={x:Math.min(sx,p.x),y:Math.min(sy,p.y),w:Math.abs(p.x-sx),h:Math.abs(p.y-sy)}; drawSelectionOverlay(item); }
+      function onDown(e){ if(!item.cropMode) return; dragging=true; const p=getPos(e); sx=p.x; sy=p.y; item.sel={x:sx,y:sy,w:0,h:0}; drawSelectionOverlay(item); }
+      function onMove(e){ if(!dragging) return; const p=getPos(e); item.sel={x:Math.min(sx,p.x),y:Math.min(sy,p.y),w:Math.abs(p.x-sx),h:Math.abs(p.y-sy)}; drawSelectionOverlay(item); }
       function onUp(e){ dragging=false; if(item.sel && (item.sel.w<5||item.sel.h<5)){item.sel=null; clearOverlay(item);} }
       c.addEventListener('mousedown',onDown); window.addEventListener('mousemove',onMove); window.addEventListener('mouseup',onUp);
       c.addEventListener('touchstart',onDown,{passive:false}); window.addEventListener('touchmove',onMove,{passive:false}); window.addEventListener('touchend',onUp);
       item._cropAttached=true; item._cropHandlers={onDown,onMove,onUp};
     }
+
     function removeCropEvents(item){
       if(!item._cropAttached) return;
       const h=item._cropHandlers,c=item.canvas;
@@ -146,13 +192,20 @@
 
     async function ensureWorker(){
       if(worker) return worker;
-      worker=Tesseract.createWorker({logger:m=>{if(m.progress) progressFill.style.width=(m.progress*100)+'%';}});
-      await worker.load(); await worker.loadLanguage('eng'); await worker.initialize('eng'); return worker;
+      worker=Tesseract.createWorker({
+        logger:m=>{ if(m.progress) progressFill.style.width=(m.progress*100)+'%'; }
+      });
+      await worker.load(); await worker.loadLanguage('eng'); await worker.initialize('eng');
+      return worker;
     }
+
     document.getElementById('runOCR').onclick=async()=>{
       if(items.length===0) return alert('No images');
       const w=await ensureWorker(); let txt='';
-      for(const [i,it] of items.entries()){ const {data}=await w.recognize(it.canvas); txt+=`--- Page ${i+1} ---\n`+(data.text||'')+'\n'; }
+      for(const [i,it] of items.entries()){
+        const {data}=await w.recognize(it.canvas);
+        txt+=`--- Page ${i+1} ---\n`+(data.text||'')+'\n';
+      }
       resultText.value=txt;
     };
   })();
