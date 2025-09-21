@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Easy Image Text — Crop Fixed</title>
+  <title>Easy Image Text — Full Features</title>
   <style>
     body { font-family: system-ui, sans-serif; padding:18px; background:#f6f8fb; }
     .container { max-width:1100px; margin:auto; background:white; padding:16px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.06); }
@@ -18,9 +18,9 @@
 </head>
 <body>
   <div class="container">
-    <h1>Easy Image Text — Crop Fixed</h1>
+    <h1>Easy Image Text — Full Features</h1>
     <input id="fileInput" type="file" accept="image/*" multiple />
-    <button id="runOCR">OCR</button>
+    <button id="runOCR">Run OCR</button>
     <div id="progressBar"><i id="progressFill"></i></div>
     <div id="canvasGrid"></div>
     <textarea id="resultText" style="width:100%; height:140px; margin-top:12px;"></textarea>
@@ -50,33 +50,30 @@
       const c=document.createElement('canvas');
       const ctx=c.getContext('2d');
 
-      // create item first
-      const item={file,img,canvas:c,ctx,wrap,filter:'original',cropMode:false,sel:null,btnCrop:null,btnApply:null,btnCancel:null};
+      const item={file,img,canvas:c,ctx,wrap,sel:null,cropMode:false};
 
-      // buttons referencing item
       const actions=document.createElement('div');
       actions.className='thumb-actions';
+
       const btnCrop=makeBtn('Crop',()=>toggleCropMode(item));
-      const btnApply=makeBtn('Apply Crop',()=>applyCrop(item));
-      const btnCancel=makeBtn('Cancel Crop',()=>cancelCrop(item));
+      const btnApply=makeBtn('Apply',()=>applyCrop(item));
+      const btnCancel=makeBtn('Cancel',()=>cancelCrop(item));
+      const btnRotate=makeBtn('Rotate',()=>rotateItem(item));
+
       btnApply.style.display='none';
       btnCancel.style.display='none';
-      const btnRotate=makeBtn('Rotate',()=>rotateItem(item));
+
       actions.append(btnCrop,btnApply,btnCancel,btnRotate);
 
-      // assign to item
-      item.btnCrop=btnCrop;
       item.btnApply=btnApply;
       item.btnCancel=btnCancel;
 
-      // assemble
       wrap.appendChild(c);
       wrap.appendChild(actions);
 
       items.push(item);
       canvasGrid.appendChild(wrap);
       drawItem(item);
-      return item;
     }
 
     function drawItem(item){
@@ -85,7 +82,7 @@
       if(w>800){h=Math.round(h*(800/w)); w=800;}
       canvas.width=w; canvas.height=h;
       ctx.drawImage(img,0,0,w,h);
-      if(item.cropMode && item.sel){ drawSelectionOverlay(item); }
+      if(item.sel) drawSelectionOverlay(item);
     }
 
     function rotateItem(item){
@@ -107,34 +104,36 @@
       item.cropMode=!item.cropMode;
       item.btnApply.style.display=item.cropMode?'inline-block':'none';
       item.btnCancel.style.display=item.cropMode?'inline-block':'none';
-      if(item.cropMode){ attachCropEvents(item); } 
-      else { removeCropEvents(item); clearOverlay(item); }
+      if(item.cropMode) attachCropEvents(item); else removeCropEvents(item);
     }
 
     function applyCrop(item){
-      if(!item.sel) return alert('No selection');
-      const s=item.sel,c=item.canvas;
+      if(!item.sel) return alert("No selection");
+      const {x,y,w,h}=item.sel;
       const tmp=document.createElement('canvas');
-      tmp.width=s.w; tmp.height=s.h;
-      tmp.getContext('2d').drawImage(c,s.x,s.y,s.w,s.h,0,0,s.w,s.h);
-      item.canvas.width=s.w; item.canvas.height=s.h;
+      tmp.width=w; tmp.height=h;
+      tmp.getContext('2d').drawImage(item.canvas,x,y,w,h,0,0,w,h);
+      item.canvas.width=w; item.canvas.height=h;
       item.ctx.drawImage(tmp,0,0);
       const newImg=new Image();
-      newImg.onload=()=>{item.img=newImg; item.cropMode=false; drawItem(item);};
-      newImg.src=item.canvas.toDataURL('image/jpeg',0.9);
+      newImg.onload=()=>{item.img=newImg; drawItem(item);};
+      newImg.src=item.canvas.toDataURL("image/jpeg",0.9);
+      item.cropMode=false; item.sel=null;
       item.btnApply.style.display='none';
       item.btnCancel.style.display='none';
+      clearOverlay(item);
     }
 
     function cancelCrop(item){
       item.cropMode=false; item.sel=null;
-      clearOverlay(item);
       item.btnApply.style.display='none';
       item.btnCancel.style.display='none';
+      clearOverlay(item);
     }
 
     function drawSelectionOverlay(item){
       clearOverlay(item);
+      if(!item.sel) return;
       const rect=document.createElement('div');
       rect.className='sel-rect';
       const r=item.canvas.getBoundingClientRect();
@@ -163,21 +162,31 @@
         if(e.touches){cx=e.touches[0].clientX; cy=e.touches[0].clientY;}
         return {x:Math.round((cx-r.left)/r.width*c.width), y:Math.round((cy-r.top)/r.height*c.height)};
       }
-      function onDown(e){ if(!item.cropMode) return; dragging=true; const p=getPos(e); sx=p.x; sy=p.y; item.sel={x:sx,y:sy,w:0,h:0}; drawSelectionOverlay(item); }
-      function onMove(e){ if(!dragging) return; const p=getPos(e); item.sel={x:Math.min(sx,p.x),y:Math.min(sy,p.y),w:Math.abs(p.x-sx),h:Math.abs(p.y-sy)}; drawSelectionOverlay(item); }
-      function onUp(e){ dragging=false; if(item.sel && (item.sel.w<5||item.sel.h<5)){item.sel=null; clearOverlay(item);} }
-      c.addEventListener('mousedown',onDown); window.addEventListener('mousemove',onMove); window.addEventListener('mouseup',onUp);
-      c.addEventListener('touchstart',onDown,{passive:false}); window.addEventListener('touchmove',onMove,{passive:false}); window.addEventListener('touchend',onUp);
-      item._cropAttached=true; item._cropHandlers={onDown,onMove,onUp};
+      function onDown(e){
+        if(!item.cropMode) return;
+        dragging=true;
+        const p=getPos(e); sx=p.x; sy=p.y;
+        item.sel={x:sx,y:sy,w:0,h:0};
+        drawSelectionOverlay(item);
+      }
+      function onMove(e){
+        if(!dragging) return;
+        const p=getPos(e);
+        item.sel={x:Math.min(sx,p.x),y:Math.min(sy,p.y),w:Math.abs(p.x-sx),h:Math.abs(p.y-sy)};
+        drawSelectionOverlay(item);
+      }
+      function onUp(){ dragging=false; }
+      c.addEventListener('mousedown',onDown);
+      window.addEventListener('mousemove',onMove);
+      window.addEventListener('mouseup',onUp);
+      c.addEventListener('touchstart',onDown,{passive:false});
+      window.addEventListener('touchmove',onMove,{passive:false});
+      window.addEventListener('touchend',onUp);
+      item._cropAttached=true;
     }
 
     function removeCropEvents(item){
-      if(!item._cropAttached) return;
-      const h=item._cropHandlers,c=item.canvas;
-      c.removeEventListener('mousedown',h.onDown); c.removeEventListener('touchstart',h.onDown);
-      window.removeEventListener('mousemove',h.onMove); window.removeEventListener('touchmove',h.onMove);
-      window.removeEventListener('mouseup',h.onUp); window.removeEventListener('touchend',h.onUp);
-      item._cropAttached=false; item._cropHandlers=null;
+      item._cropAttached=false;
     }
 
     fileInput.addEventListener('change',ev=>{
@@ -195,7 +204,9 @@
       worker=Tesseract.createWorker({
         logger:m=>{ if(m.progress) progressFill.style.width=(m.progress*100)+'%'; }
       });
-      await worker.load(); await worker.loadLanguage('eng'); await worker.initialize('eng');
+      await worker.load();
+      await worker.loadLanguage('eng');
+      await worker.initialize('eng');
       return worker;
     }
 
