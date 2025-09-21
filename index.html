@@ -3,386 +3,324 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Easy OCR — Demo (Crop + PDF/TXT/DOC, image-PDF)</title>
-
-  <!-- Tailwind Play CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-
-  <!-- Cropper.js CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/cropperjs@1.5.13/dist/cropper.min.css"/>
-
+  <title>Easy Image Text — Filters, Multi-Page PDF, Camera & OCR</title>
   <style>
-    .glass { background: rgba(255,255,255,0.95); backdrop-filter: blur(4px); }
-    textarea { resize: vertical; }
-    pre.debug { white-space: pre-wrap; word-break: break-word; }
-    .preview-box { min-height: 220px; max-height: 420px; display:flex; align-items:center; justify-content:center; }
-    img#preview { max-width:100%; max-height:420px; display:block; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial; padding:18px; background:#f6f8fb; color:#111; }
+    .container { max-width:980px; margin:auto; background:white; padding:16px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.06); }
+    h1 { margin:4px 0 12px; font-size:20px }
+    .controls > * { margin-right:8px; margin-bottom:8px; }
+    #canvasGrid { display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; }
+    .canvasItem { border:1px solid #e6e6e6; padding:6px; border-radius:6px; background:#fff; min-width:180px; }
+    .canvasItem canvas { max-width:100%; height:auto; display:block; background:#fafafa; }
+    textarea { width:100%; height:150px; margin-top:12px; padding:8px; font-family:monospace; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    button { padding:8px 10px; border-radius:6px; border:1px solid #ddd; background:#fff; cursor:pointer; }
+    button.primary { background:#0b74ff; color:white; border-color:#0b74ff; }
+    .small { padding:6px 8px; font-size:13px; }
+    label { font-size:13px; color:#444; }
+    #progressBar { height:8px; background:#eee; border-radius:6px; overflow:hidden; margin-top:8px; }
+    #progressBar > i { display:block; height:100%; background:#0b74ff; width:0%; transition:width .2s ease; }
+    .muted { color:#666; font-size:13px; }
+    .thumb-actions { margin-top:6px; display:flex; gap:6px; align-items:center; justify-content:center; }
+    input[type="range"] { width:160px; }
+    /* camera modal */
+    #cameraModal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); align-items:center; justify-content:center; z-index:9999; }
+    #cameraModal .box { background:#fff; padding:10px; border-radius:8px; max-width:420px; width:95%; text-align:center; }
+    video { width:100%; border-radius:6px; background:#000; }
   </style>
 </head>
-<body class="min-h-screen bg-gray-50 py-10">
-  <main class="max-w-4xl mx-auto px-4">
-    <div class="glass rounded-2xl shadow-lg p-6">
-      <header class="mb-4">
-        <h1 class="text-2xl font-semibold text-slate-800">Easy Image Text — Demo (Crop + PDF/TXT/DOC)</h1>
-        <p class="text-sm text-slate-500 mt-1">Select image → crop → Recognize → Download (TXT / image-PDF / DOC)</p>
-      </header>
+<body>
+  <div class="container">
+    <h1>Easy Image Text — Filters, Multi-Page PDF, Camera & OCR</h1>
 
-      <!-- Controls -->
-      <section class="grid grid-cols-1 md:grid-cols-3 gap-3 items-center">
-        <label class="flex items-center gap-3 col-span-1 md:col-span-2">
-          <input id="imageInput" type="file" accept="image/*" class="block w-full text-sm text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:bg-slate-100 file:cursor-pointer"/>
-        </label>
-
-        <div class="flex gap-2 items-center">
-          <select id="lang" class="px-3 py-2 rounded-md border border-slate-200 bg-white text-sm">
-            <option value="eng">English (eng)</option>
-            <option value="hin">Hindi (hin)</option>
-          </select>
-          <button id="recognizeBtn" class="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-blue-600 text-white text-sm shadow hover:bg-blue-700 disabled:opacity-60" disabled>
-            <svg id="spinner" class="w-4 h-4 animate-spin hidden" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="white" stroke-width="3" stroke-linecap="round" fill="none" stroke-dasharray="60"></circle></svg>
-            Recognize Text
-          </button>
-        </div>
-      </section>
-
-      <!-- Preview + result -->
-      <section class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div class="border border-slate-100 rounded-lg p-3 bg-white">
-          <div class="flex justify-between items-center mb-2">
-            <h3 class="text-sm font-medium text-slate-700">Preview & Crop</h3>
-            <div class="flex gap-2">
-              <button id="startCrop" class="px-3 py-1 rounded-md border border-slate-200 text-sm">Start Crop</button>
-              <button id="applyCrop" class="px-3 py-1 rounded-md bg-amber-600 text-white text-sm">Apply Crop</button>
-              <button id="resetCrop" class="px-3 py-1 rounded-md border border-slate-200 text-sm">Reset</button>
-            </div>
-          </div>
-          <div class="preview-box bg-gray-50 rounded-md overflow-hidden">
-            <div id="noPreview" class="text-sm text-slate-400">No image selected</div>
-            <div style="max-width:100%; display:none" id="imgWrap">
-              <img id="preview" alt="preview image"/>
-            </div>
-          </div>
-          <small class="text-xs text-slate-400 mt-2">Use <strong>Start Crop</strong> to enable crop box. Drag to select area and press <strong>Apply Crop</strong>.</small>
-        </div>
-
-        <div class="bg-white border border-slate-100 rounded-lg p-3 flex flex-col">
-          <div class="flex items-start justify-between">
-            <h3 class="text-sm font-medium text-slate-700">Recognized text</h3>
-            <div class="flex gap-2">
-              <button id="copyBtn" class="px-3 py-1 rounded-md border border-slate-200 text-sm hover:bg-slate-50">Copy</button>
-              <button id="downloadTxt" class="px-3 py-1 rounded-md bg-green-600 text-white text-sm hover:bg-green-700">Download .txt</button>
-              <button id="downloadPdf" class="px-3 py-1 rounded-md bg-emerald-700 text-white text-sm hover:bg-emerald-800">Download .pdf</button>
-              <button id="downloadDoc" class="px-3 py-1 rounded-md bg-indigo-700 text-white text-sm hover:bg-indigo-800">Download .doc</button>
-            </div>
-          </div>
-
-          <textarea id="result" placeholder="Recognized text will appear here..." class="mt-3 h-56 p-3 border border-slate-100 rounded-md text-sm font-mono text-slate-700"></textarea>
-        </div>
-      </section>
-
-      <!-- helper + debug -->
-      <section class="mt-4 text-sm text-slate-500">
-        <p>Tip: Crop to focus on text area for better results. Hindi may take longer to load.</p>
-      </section>
-
-      <section class="mt-6">
-        <div class="bg-white border border-slate-100 rounded-lg p-4">
-          <h4 class="text-sm font-medium text-slate-700 mb-2">Debug</h4>
-          <div class="flex gap-4 items-center text-sm">
-            <div id="progress" class="text-slate-600"></div>
-            <div id="errors" class="text-red-600"></div>
-          </div>
-          <pre id="debug" class="debug mt-3 text-xs bg-slate-900 text-white p-3 rounded-lg max-h-44 overflow-auto"></pre>
-        </div>
-      </section>
+    <div class="row controls">
+      <input id="fileInput" type="file" accept="image/*,application/pdf" multiple />
+      <select id="langSelect">
+        <option value="eng">English (eng)</option>
+        <option value="hin">Hindi (hin)</option>
+        <option value="eng+hin">English + Hindi</option>
+      </select>
+      <label class="muted">BW threshold: <span id="thVal">128</span></label>
+      <input id="thSlider" type="range" min="0" max="255" value="128" />
     </div>
-  </main>
 
-  <!-- Libraries loaded dynamically: Tesseract, jsPDF, html2canvas, Cropper -->
+    <div class="row" style="margin-top:8px;">
+      <button id="btnOriginal" class="small">Original</button>
+      <button id="btnNoShadow" class="small">No Shadow</button>
+      <button id="btnLighten" class="small">Lighten</button>
+      <button id="btnMagic" class="small">Magic Color</button>
+      <button id="btnGray" class="small">Grayscale</button>
+      <button id="btnBW" class="small">Black & White</button>
+      <button id="btnEco" class="small">Eco</button>
+      <button id="autoCrop" class="small">Auto-Crop (edges)</button>
+    </div>
+
+    <div class="row" style="margin-top:8px;">
+      <button id="exportPdfMulti" class="primary small">Export Multi-Page PDF</button>
+      <button id="runOCR" class="small">Recognize Text (OCR)</button>
+      <button id="openCamera" class="small">Open Camera</button>
+      <button id="clearAll" class="small">Clear All</button>
+      <label class="muted" id="hint">Tip: On mobile use file input camera. Multiple images create multi-page PDF.</label>
+    </div>
+
+    <div id="progressBar"><i id="progressFill"></i></div>
+    <div class="muted" id="statusText" style="margin-top:6px">Status: idle</div>
+
+    <div id="canvasGrid"></div>
+
+    <textarea id="resultText" placeholder="Recognized text will appear here..."></textarea>
+  </div>
+
+  <!-- Camera modal -->
+  <div id="cameraModal" aria-hidden="true">
+    <div class="box">
+      <video id="cameraVideo" autoplay playsinline></video>
+      <div style="margin-top:8px;">
+        <button id="cameraCapture" class="small">Capture</button>
+        <button id="cameraClose" class="small" style="margin-left:6px">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CDNs -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+
   <script>
-    function loadScript(src){
-      return new Promise((res,rej)=>{
-        const s=document.createElement('script'); s.src=src; s.async=true;
-        s.onload=()=>res(src); s.onerror=()=>rej(src); document.head.appendChild(s);
-      });
+  (function(){
+    // Elements
+    const fileInput = document.getElementById('fileInput');
+    const canvasGrid = document.getElementById('canvasGrid');
+    const progressFill = document.getElementById('progressFill');
+    const statusText = document.getElementById('statusText');
+    const resultText = document.getElementById('resultText');
+    const langSelect = document.getElementById('langSelect');
+    const thSlider = document.getElementById('thSlider');
+    const thVal = document.getElementById('thVal');
+
+    const openCameraBtn = document.getElementById('openCamera');
+    const cameraModal = document.getElementById('cameraModal');
+    const cameraVideo = document.getElementById('cameraVideo');
+    const cameraCapture = document.getElementById('cameraCapture');
+    const cameraClose = document.getElementById('cameraClose');
+
+    let items = []; // { file, img, canvas, ctx, filter, wrap }
+    let worker = null;
+    let cameraStream = null;
+
+    // pdf.js worker path
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
     }
 
-    (async function(){
-      const dbg = el('debug'), errEl = el('errors');
-      log("Loading resources...");
+    function setStatus(s){ statusText.textContent = 'Status: ' + s; }
 
-      // Tesseract (try unpkg then jsdelivr)
-      try {
-        await loadScript('https://unpkg.com/tesseract.js@2.1.4/dist/tesseract.min.js');
-        log("Tesseract loaded (unpkg).");
-      } catch(e){
-        log("unpkg failed, trying jsdelivr...");
-        try { await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@2.1.4/dist/tesseract.min.js'); log("Tesseract loaded (jsdelivr)."); }
-        catch(e2){ errEl.textContent = "Failed to load Tesseract library (CDN blocked)"; log("Both Tesseract CDNs failed."); return; }
+    thSlider.addEventListener('input', ()=>{ thVal.textContent = thSlider.value; });
+
+    // create canvas item
+    function createCanvasItem(img, file){
+      const wrap = document.createElement('div'); wrap.className='canvasItem';
+      const c = document.createElement('canvas'); const ctx = c.getContext('2d');
+      wrap.appendChild(c);
+      const actions = document.createElement('div'); actions.className='thumb-actions';
+      const btnOrig = makeBtn('Original', ()=>{ item.filter='original'; drawItem(item); });
+      const btnBW = makeBtn('BW', ()=>{ item.filter='bw'; drawItem(item); });
+      const btnCrop = makeBtn('Crop', ()=>autoCropItem(item));
+      const btnDel = makeBtn('Delete', ()=>{ removeItem(item); });
+      actions.appendChild(btnOrig); actions.appendChild(btnBW); actions.appendChild(btnCrop); actions.appendChild(btnDel);
+      wrap.appendChild(actions);
+
+      const item = { file, img, canvas: c, ctx, filter: 'original', wrap };
+      items.push(item);
+      canvasGrid.appendChild(wrap);
+      drawItem(item);
+      return item;
+    }
+
+    function makeBtn(text, cb){ const b=document.createElement('button'); b.className='small'; b.textContent=text; b.onclick=cb; return b; }
+
+    function drawItem(item, scaleMaxWidth=1200){
+      const img = item.img; const canvas = item.canvas; const ctx = item.ctx;
+      let w = img.width, h = img.height;
+      if (w > scaleMaxWidth) { h = Math.round(h * (scaleMaxWidth / w)); w = scaleMaxWidth; }
+      canvas.width = w; canvas.height = h;
+      ctx.save();
+      switch(item.filter){
+        case 'original': ctx.filter='none'; ctx.drawImage(img,0,0,w,h); break;
+        case 'no-shadow': ctx.filter='brightness(1.25) contrast(1.2)'; ctx.drawImage(img,0,0,w,h); break;
+        case 'lighten': ctx.filter='brightness(1.2) contrast(1.15)'; ctx.drawImage(img,0,0,w,h); break;
+        case 'magic': ctx.filter='saturate(1.4) contrast(1.1) brightness(1.05)'; ctx.drawImage(img,0,0,w,h); break;
+        case 'grayscale': ctx.filter='grayscale(1)'; ctx.drawImage(img,0,0,w,h); break;
+        case 'eco': ctx.filter='grayscale(1) contrast(0.9) brightness(0.95)'; ctx.drawImage(img,0,0,w,h); break;
+        case 'bw': ctx.filter='none'; ctx.drawImage(img,0,0,w,h); binarize(ctx,w,h,parseInt(thSlider.value,10)); break;
+        default: ctx.filter='none'; ctx.drawImage(img,0,0,w,h);
       }
+      ctx.restore();
+    }
 
-      // jsPDF
-      try { await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'); log("jsPDF loaded."); } catch(e){ log("jsPDF load failed."); }
+    function applyFilterToAll(filterName){ items.forEach(it=>{ it.filter=filterName; drawItem(it); }); }
+    function removeItem(item){ const idx = items.indexOf(item); if(idx>=0){ items.splice(idx,1); item.wrap.remove(); } }
 
-      // html2canvas (for image-based PDF)
-      try { await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'); log("html2canvas loaded."); } catch(e){ log("html2canvas load failed."); }
+    function binarize(ctx,w,h,threshold=128){
+      try{
+        const imgd = ctx.getImageData(0,0,w,h); const d = imgd.data;
+        for(let i=0;i<d.length;i+=4){ const r=d[i], g=d[i+1], b=d[i+2]; const lum = 0.299*r + 0.587*g + 0.114*b; const v = lum >= threshold ? 255 : 0; d[i]=d[i+1]=d[i+2]=v; }
+        ctx.putImageData(imgd,0,0);
+      } catch(e){ console.warn('binarize fail', e); }
+    }
 
-      // Cropper.js
-      try { await loadScript('https://unpkg.com/cropperjs@1.5.13/dist/cropper.min.js'); log("Cropper loaded."); } catch(e){ log("Cropper load failed."); }
+    function autoCropItem(item){
+      const c = item.canvas; const ctx = item.ctx; const w = c.width, h = c.height;
+      try{
+        const imgd = ctx.getImageData(0,0,w,h); const d = imgd.data;
+        let minX=w, minY=h, maxX=0, maxY=0;
+        const thresh = 230;
+        for(let y=0;y<h;y+=2){
+          for(let x=0;x<w;x+=2){
+            const i = (y*w + x)*4;
+            const r=d[i], g=d[i+1], b=d[i+2];
+            const lum = 0.299*r + 0.587*g + 0.114*b;
+            if(lum < thresh){ if(x<minX) minX=x; if(y<minY) minY=y; if(x>maxX) maxX=x; if(y>maxY) maxY=y; }
+          }
+        }
+        if(maxX<=minX || maxY<=minY){ alert('Auto-crop failed: no content detected'); return; }
+        const padding = 8; minX = Math.max(0, minX - padding); minY = Math.max(0, minY - padding);
+        maxX = Math.min(w, maxX + padding); maxY = Math.min(h, maxY + padding);
+        const nw = maxX - minX, nh = maxY - minY;
+        const tmp = document.createElement('canvas'); tmp.width=nw; tmp.height=nh;
+        const tctx = tmp.getContext('2d'); tctx.drawImage(c, minX, minY, nw, nh, 0, 0, nw, nh);
+        // replace
+        item.canvas.width = nw; item.canvas.height = nh; item.ctx.drawImage(tmp,0,0);
+        const newImg = new Image(); newImg.onload = ()=>{ item.img = newImg; drawItem(item); }; newImg.src = item.canvas.toDataURL('image/jpeg',0.9);
+      } catch(e){ console.warn('autocrop error', e); alert('Auto-crop error'); }
+    }
 
-      initUI();
-    })();
+    // file input (images & pdfs)
+    fileInput.addEventListener('change', async (ev)=>{
+      const files = Array.from(ev.target.files || []);
+      if(files.length===0) return;
+      setStatus('Loading ' + files.length + ' file(s)...');
+      for(const f of files){
+        if(f.type === 'application/pdf'){
+          try{
+            const arr = await f.arrayBuffer();
+            const pdf = await window.pdfjsLib.getDocument({data:arr}).promise;
+            const n = pdf.numPages;
+            for(let p=1;p<=n;p++){
+              const page = await pdf.getPage(p);
+              const vp = page.getViewport({ scale: 1.5 });
+              const tmp = document.createElement('canvas'); tmp.width = Math.floor(vp.width); tmp.height = Math.floor(vp.height);
+              await page.render({ canvasContext: tmp.getContext('2d'), viewport: vp }).promise;
+              const img = new Image(); img.src = tmp.toDataURL('image/jpeg',0.9); await new Promise(res=>{ img.onload = res; });
+              createCanvasItem(img, f);
+            }
+          } catch(err){ console.error('pdf load err',err); alert('PDF load error: '+(err.message||err)); }
+        } else {
+          const url = URL.createObjectURL(f); const img = new Image();
+          img.onload = function(){ createCanvasItem(img, f); URL.revokeObjectURL(url); };
+          img.src = url;
+        }
+      }
+      setStatus('Files loaded');
+    });
 
-    function el(id){ return document.getElementById(id); }
-    function log(msg){ const d=el('debug'); d.textContent += msg + "\n"; console.log(msg); }
-    function showErr(msg){ el('errors').textContent = msg; log("ERROR: " + msg); }
+    // filter buttons apply to all items
+    document.getElementById('btnOriginal').onclick = ()=>applyFilterToAll('original');
+    document.getElementById('btnNoShadow').onclick = ()=>applyFilterToAll('no-shadow');
+    document.getElementById('btnLighten').onclick = ()=>applyFilterToAll('lighten');
+    document.getElementById('btnMagic').onclick = ()=>applyFilterToAll('magic');
+    document.getElementById('btnGray').onclick = ()=>applyFilterToAll('grayscale');
+    document.getElementById('btnBW').onclick = ()=>applyFilterToAll('bw');
+    document.getElementById('btnEco').onclick = ()=>applyFilterToAll('eco');
+    document.getElementById('autoCrop').onclick = ()=>items.forEach(it=>autoCropItem(it));
+    document.getElementById('clearAll').onclick = ()=>{ items=[]; canvasGrid.innerHTML=''; resultText.value=''; setStatus('Cleared'); progressFill.style.width='0%'; };
 
-    let cropper = null;
-    let currentImageURL = '';
-    let lastCroppedBlobURL = '';
-
-    function initUI(){
-      const input = el('imageInput'), preview = el('preview'), imgWrap = el('imgWrap'), noPreview = el('noPreview');
-      const startCrop = el('startCrop'), applyCrop = el('applyCrop'), resetCrop = el('resetCrop');
-      const btn = el('recognizeBtn'), result = el('result'), progressEl = el('progress'), langSel = el('lang');
-      const copyBtn = el('copyBtn'), downloadTxt = el('downloadTxt'), downloadPdf = el('downloadPdf'), downloadDoc = el('downloadDoc');
-
-      input.addEventListener('change', (e)=>{
-        const f = e.target.files[0];
-        if(!f) return;
-        if(currentImageURL) URL.revokeObjectURL(currentImageURL);
-        if(lastCroppedBlobURL) { URL.revokeObjectURL(lastCroppedBlobURL); lastCroppedBlobURL=''; }
-        currentImageURL = URL.createObjectURL(f);
-        preview.src = currentImageURL;
-        imgWrap.style.display = 'block';
-        noPreview.style.display = 'none';
-        result.value = '';
-        btn.disabled = false;
-        progressEl.textContent = '';
-        if(cropper){ cropper.destroy(); cropper = null; }
-      });
-
-      startCrop.addEventListener('click', ()=>{
-        if(!preview.src){ showErr("Select an image first."); return; }
-        if(cropper){ showErr("Cropper already active. Drag handles then press Apply Crop."); return; }
-        cropper = new Cropper(preview, {
-          viewMode: 1, autoCropArea: 0.7, movable: true, zoomable: true, scalable: false, background: false,
+    // Export multi-page PDF
+    document.getElementById('exportPdfMulti').onclick = ()=>{
+      if(items.length===0){ alert('Pehle images add karo'); return; }
+      setStatus('Creating PDF...');
+      try{
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({ unit:'pt' });
+        items.forEach((it, idx)=>{
+          const c = it.canvas; const imgData = c.toDataURL('image/jpeg', 0.92);
+          const wPt = c.width * 0.75, hPt = c.height * 0.75;
+          if(idx===0){ pdf.deletePage(1); pdf.addPage([wPt,hPt]); pdf.addImage(imgData, 'JPEG', 0, 0, wPt, hPt); }
+          else { pdf.addPage([wPt,hPt]); pdf.addImage(imgData, 'JPEG', 0, 0, wPt, hPt); }
         });
-        log("Cropper started. Set area and press Apply Crop.");
-      });
+        pdf.save('scan-multipage.pdf'); setStatus('PDF ready');
+      } catch(err){ console.error(err); setStatus('PDF error'); alert('PDF export error: '+(err.message||err)); }
+    };
 
-      applyCrop.addEventListener('click', ()=>{
-        if(!cropper){ showErr("Cropper not active."); return; }
-        const canvas = cropper.getCroppedCanvas();
-        if(!canvas){ showErr("Crop failed."); return; }
-        canvas.toBlob((blob)=>{
-          if(lastCroppedBlobURL) URL.revokeObjectURL(lastCroppedBlobURL);
-          lastCroppedBlobURL = URL.createObjectURL(blob);
-          preview.src = lastCroppedBlobURL;
-          cropper.destroy(); cropper = null;
-          log("Applied crop. Cropped image ready for OCR.");
-        }, 'image/png');
-      });
-
-      resetCrop.addEventListener('click', ()=>{
-        if(cropper){ cropper.destroy(); cropper = null; log("Cropper destroyed."); }
-        if(lastCroppedBlobURL){ URL.revokeObjectURL(lastCroppedBlobURL); lastCroppedBlobURL=''; }
-        if(currentImageURL){ preview.src = currentImageURL; imgWrap.style.display='block'; noPreview.style.display='none'; }
-        result.value='';
-        el('errors').textContent='';
-        progressEl.textContent='';
-      });
-
-      btn.addEventListener('click', async ()=>{
-        const imageForOCR = lastCroppedBlobURL || currentImageURL;
-        if(!imageForOCR){ showErr("Select an image first."); return; }
-        btn.disabled = true;
-        el('spinner').classList.remove('hidden');
-        progressEl.textContent = 'Initializing...';
-        el('errors').textContent = '';
-        try{
-          const worker = Tesseract.createWorker({
-            logger: m => {
-              const pct = m.progress ? Math.round(m.progress*100) : '';
-              progressEl.textContent = `${m.status}${pct? ' ('+pct+'%)':''}`;
-              log(`logger: ${m.status} ${pct? '('+pct+'%)':''}`);
-            }
-          });
-          await worker.load();
-          const chosen = langSel.value || 'eng';
-          await worker.loadLanguage(chosen);
-          await worker.initialize(chosen);
-          progressEl.textContent = 'Recognizing...';
-          const { data } = await worker.recognize(imageForOCR);
-          result.value = data.text.trim();
-          progressEl.textContent = 'Done';
-          await worker.terminate();
-        } catch(err){
-          showErr(err.message || err);
-          progressEl.textContent = 'Error';
-        } finally {
-          btn.disabled = false;
-          el('spinner').classList.add('hidden');
-        }
-      });
-
-      copyBtn.addEventListener('click', async ()=>{
-        try{
-          await navigator.clipboard.writeText(result.value || '');
-          copyBtn.textContent = 'Copied';
-          setTimeout(()=> copyBtn.textContent = 'Copy', 1200);
-        } catch(e){
-          showErr("Copy failed: " + (e.message||e));
-        }
-      });
-
-      downloadTxt.addEventListener('click', ()=>{
-        const text = result.value || '';
-        const blob = new Blob([text], {type:'text/plain;charset=utf-8'});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = 'ocr-result.txt'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-      });
-
-      // REPLACED downloadPdf: use html2canvas to render a wrapper (image + text) so Hindi displays correctly
-      downloadPdf.addEventListener('click', async ()=>{
-        const text = result.value || '';
-        if(!text && !preview.src){ showErr("Nothing to export — run OCR first."); return; }
-
-        // create wrapper node
-        const wrapper = document.createElement('div');
-        wrapper.style.width = '794px'; // A4-ish at 96dpi
-        wrapper.style.padding = '20px';
-        wrapper.style.background = '#fff';
-        wrapper.style.color = '#111';
-        wrapper.style.fontFamily = "'Noto Sans Devanagari', 'Arial', sans-serif";
-        wrapper.style.boxSizing = 'border-box';
-        wrapper.style.lineHeight = '1.4';
-        wrapper.style.fontSize = '14px';
-
-        // load Noto Sans Devanagari for good Devanagari rendering
-        const gf = document.createElement('link');
-        gf.rel = 'stylesheet';
-        gf.href = 'https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;700&display=swap';
-        document.head.appendChild(gf);
-
-        // Title
-        const h = document.createElement('h2');
-        h.textContent = 'OCR result';
-        h.style.margin = '0 0 12px 0';
-        wrapper.appendChild(h);
-
-        // include image preview (cropped if applied)
-        try {
-          if(preview && preview.src){
-            const imgEl = document.createElement('img');
-            imgEl.src = preview.src;
-            imgEl.style.maxWidth = '100%';
-            imgEl.style.display = 'block';
-            imgEl.style.marginBottom = '12px';
-            wrapper.appendChild(imgEl);
+    // Tesseract worker init (langPath -> /tessdata for Netlify)
+    async function ensureWorker(langVal){
+      if(worker) return worker;
+      setStatus('Initializing OCR worker...');
+      worker = window.Tesseract.createWorker({
+        langPath: '/tessdata', // Netlify: put traineddata in public/tessdata
+        logger(m){
+          if(m.status === 'recognizing text' && typeof m.progress === 'number'){
+            progressFill.style.width = Math.round(m.progress*100) + '%';
+            setStatus('OCR: recognizing text ' + Math.round(m.progress*100) + '%');
+          } else if(m.status){
+            setStatus('OCR: ' + m.status);
           }
-        } catch(e){ log('image include failed: ' + e); }
-
-        // text content
-        const pre = document.createElement('pre');
-        pre.textContent = text;
-        pre.style.whiteSpace = 'pre-wrap';
-        pre.style.fontFamily = wrapper.style.fontFamily;
-        pre.style.fontSize = '12px';
-        pre.style.margin = '0';
-        wrapper.appendChild(pre);
-
-        // put wrapper offscreen and wait for fonts to load
-        wrapper.style.position = 'fixed';
-        wrapper.style.left = '-9999px';
-        wrapper.style.top = '0';
-        document.body.appendChild(wrapper);
-        await new Promise(res => setTimeout(res, 600)); // small wait for font
-
-        try {
-          const canvas = await html2canvas(wrapper, { scale: 2, useCORS: true, allowTaint: true });
-          const imgData = canvas.toDataURL('image/png');
-
-          const { jsPDF } = window.jspdf || {};
-          if(!jsPDF){ showErr('jsPDF not loaded'); document.body.removeChild(wrapper); return; }
-          const pdf = new jsPDF({ unit: 'pt', format: 'a4' });
-          const pageWidth = pdf.internal.pageSize.getWidth();
-          const pageHeight = pdf.internal.pageSize.getHeight();
-
-          const canvasWidth = canvas.width;
-          const canvasHeight = canvas.height;
-          const ratio = pageWidth / canvasWidth;
-          const imgHeightOnPage = canvasHeight * ratio;
-
-          if (imgHeightOnPage <= pageHeight - 40) {
-            pdf.addImage(imgData, 'PNG', 20, 20, pageWidth - 40, imgHeightOnPage);
-          } else {
-            // multi-page
-            let remainingHeight = canvasHeight;
-            let position = 0;
-            const pageCanvasHeight = Math.floor((pageHeight - 40) / ratio);
-
-            while (remainingHeight > 0) {
-              const tmpCanvas = document.createElement('canvas');
-              tmpCanvas.width = canvas.width;
-              tmpCanvas.height = Math.min(pageCanvasHeight, remainingHeight);
-              const ctx = tmpCanvas.getContext('2d');
-              ctx.drawImage(canvas, 0, position, canvas.width, tmpCanvas.height, 0, 0, tmpCanvas.width, tmpCanvas.height);
-              const chunkData = tmpCanvas.toDataURL('image/png');
-              if (position > 0) pdf.addPage();
-              pdf.addImage(chunkData, 'PNG', 20, 20, pageWidth - 40, (tmpCanvas.height * ratio));
-              position += tmpCanvas.height;
-              remainingHeight -= tmpCanvas.height;
-            }
-          }
-
-          pdf.save('ocr-result.pdf');
-        } catch(e){
-          showErr('PDF error: ' + (e.message || e));
-        } finally {
-          // cleanup
-          document.body.removeChild(wrapper);
         }
       });
+      await worker.load();
+      try { await worker.loadLanguage(langVal); await worker.initialize(langVal); }
+      catch(err){ console.warn('lang init failed', err); await worker.loadLanguage('eng'); await worker.initialize('eng'); }
+      setStatus('OCR worker ready'); return worker;
+    }
 
-      // Download as Word .doc (HTML-based)
-      downloadDoc.addEventListener('click', ()=>{
-        const text = result.value || '';
-        if(!text){ showErr("Nothing to export — run OCR first."); return; }
-        const title = "OCR result";
-        const htmlContent = `
-          <!doctype html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>${escapeHtml(title)}</title>
-            <style>
-              body{font-family: Arial, Helvetica, sans-serif; font-size: 12pt; color:#111; padding:20px}
-              h1{color:#0b6;}
-              pre{white-space:pre-wrap; font-family:inherit}
-            </style>
-          </head>
-          <body>
-            <h1>${escapeHtml(title)}</h1>
-            <pre>${escapeHtml(text)}</pre>
-          </body>
-          </html>
-        `;
-        const blob = new Blob([htmlContent], { type: 'application/msword;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = 'ocr-result.doc'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-      });
+    // OCR all canvases sequentially
+    document.getElementById('runOCR').onclick = async ()=>{
+      if(items.length===0){ alert('Pehle images add karo'); return; }
+      const langVal = langSelect.value || 'eng';
+      try{
+        const w = await ensureWorker(langVal);
+        setStatus('Starting OCR on ' + items.length + ' page(s)...');
+        let final = '';
+        for(let i=0;i<items.length;i++){
+          setStatus('Recognizing page ' + (i+1) + ' / ' + items.length);
+          const it = items[i];
+          drawItem(it);
+          const { data } = await w.recognize(it.canvas);
+          final += '\n\n--- Page ' + (i+1) + ' ---\n\n' + (data.text || '');
+          progressFill.style.width = Math.round(((i+1)/items.length)*100) + '%';
+        }
+        resultText.value = final.trim();
+        setStatus('OCR complete'); progressFill.style.width='100%';
+      } catch(err){ console.error(err); setStatus('OCR error'); alert('OCR error: '+(err.message||err)); }
+    };
 
-      // helper: escape HTML
-      function escapeHtml(str){
-        if(!str) return '';
-        return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
-      }
+    // Camera integration (open, capture, close)
+    openCameraBtn.addEventListener('click', async ()=>{
+      try{
+        cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+        cameraVideo.srcObject = cameraStream; cameraModal.style.display='flex'; cameraModal.setAttribute('aria-hidden','false');
+      } catch(err){ alert('Camera access denied/unavailable: '+(err.message||err)); }
+    });
+    cameraClose.addEventListener('click', ()=>{ stopCamera(); });
+    cameraCapture.addEventListener('click', ()=>{
+      if(!cameraVideo.videoWidth) return alert('Camera not ready');
+      const tmp = document.createElement('canvas'); tmp.width = cameraVideo.videoWidth; tmp.height = cameraVideo.videoHeight;
+      const tctx = tmp.getContext('2d'); tctx.drawImage(cameraVideo,0,0,tmp.width,tmp.height);
+      const img = new Image(); img.onload = ()=>{ createCanvasItem(img, new File([], 'camera.jpg', { type:'image/jpeg' })); };
+      img.src = tmp.toDataURL('image/jpeg', 0.95);
+      stopCamera();
+    });
 
-    } // initUI end
+    function stopCamera(){ if(cameraStream){ cameraStream.getTracks().forEach(t=>t.stop()); cameraStream=null; } cameraVideo.srcObject=null; cameraModal.style.display='none'; cameraModal.setAttribute('aria-hidden','true'); }
+
+    // safe cleanup before unload
+    window.addEventListener('beforeunload', ()=>{ if(worker) worker.terminate && worker.terminate(); if(cameraStream) stopCamera(); });
+
+    // expose createCanvasItem globally for future use (optional)
+    window.createCanvasItem = createCanvasItem;
+
+  })();
   </script>
-
-  <!-- Cropper.js -->
-  <script src="https://unpkg.com/cropperjs@1.5.13/dist/cropper.min.js"></script>
 </body>
 </html>
